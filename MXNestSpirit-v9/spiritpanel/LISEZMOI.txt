@@ -1,0 +1,24 @@
+MXNestSpirit — panneau d'imbrication pour Illustrator
+MX Spirit, Montpellier
+
+INSTALLATION
+  Windows : double-clic sur install-windows.bat
+  Mac     : double-clic sur install-mac.command (si refus : clic droit > Ouvrir)
+  Puis relance Illustrator : Fenetre > Extensions > MXNestSpirit
+
+Le panneau reste installe. Plus besoin de passer par Fichier > Scripts.
+
+POURQUOI C'EST PLUS RAPIDE QUE LE SCRIPT
+  Le calcul tourne dans le moteur JavaScript de Chrome, pas dans celui
+  d'Illustrator. Meme code, 30 a 50 fois plus vite. Illustrator ne fait
+  plus que lire les pieces et les reposer.
+
+ORDRE D'UTILISATION
+  1. Analyser
+  2. Imbriquer (l'apercu se met a jour a chaque amelioration trouvee)
+  3. Appliquer   -> Ctrl+Z annule tout d'un coup
+
+SI RIEN N'EST TROUVE
+  Clique sur "Que contient le fichier ?" : il liste les tons directs et les
+  couleurs presentes. Choisis ensuite "Meme couleur que le trace selectionne"
+  apres avoir clique sur un contour de coupe.
