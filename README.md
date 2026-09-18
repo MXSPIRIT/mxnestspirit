@@ -1,37 +1,47 @@
 # MXNestSpirit
 
 True-shape nesting for Adobe Illustrator, built for motocross graphics kits.
-Free and open source, written in a workshop that has been producing kits since 2009.
+Free, open source, written in a workshop that has been producing kits since 2009.
 
 **MX Spirit — Montpellier, France** · [Version française](README-fr.md)
 
 ---
 
+## What's new in 1.1 — the Sparrow engine
+
+Version 1.0 shipped with one engine of my own: a raster true-shape nester. It
+matched eCut on a real kit — 0.826 m against 0.829 m.
+
+Version 1.1 adds a second engine, **Sparrow**, an academic solver from KU Leuven,
+state of the art for 2D irregular strip packing, MIT licensed. Both now run on
+the same job and the shorter sheet wins.
+
+On a real 83-part kit:
+
+| Engine | Sheet length |
+|---|---|
+| Built-in engine | 0.800 m |
+| **Sparrow** | **0.721 m** |
+
+**Around 10 cm saved per sheet, roughly 10 %.** Over a hundred kits, ten metres
+of vinyl.
+
+> **Sparrow is Windows-only in this release.** The bundled solver is a Windows
+> executable. On macOS the panel falls back to the built-in engine: everything
+> works, you simply don't get the extra 10 %. A macOS build — or the WebAssembly
+> version of Sparrow — would fix that. Contributions welcome.
+
 ## What it does
 
 It lays your parts out on the roll following their **real outline**, not their
 bounding box. Each part stays one block: cut contour, clipping mask and logos
-all rotate together.
+rotate together.
 
 - free rotation every 5 to 30°, or locked for gradient films
 - guaranteed blade gap and edge margin, never quietly reduced
 - small parts drop into the gaps between large ones, and into their holes
-- optional pairing of parts, kept only when it actually shortens the sheet
 - registration marks drawn afterwards, on their own locked layer
-- automatic check: the tool verifies that no two parts touch
-
-## Measured results
-
-Real Husqvarna kit, 16 parts, 1350 mm roll, 1 mm blade gap:
-
-| Search level | Length | Fill | Time |
-|---|---|---|---|
-| Fast | 0.862 m | 61.4 % | 2 s |
-| Normal | 0.830 m | 63.7 % | 5 s |
-| Maximum | **0.826 m** | 64.1 % | 36 s |
-| eCut (paid reference) | 0.829 m | — | — |
-
-Zero overlap in all three, checked automatically.
+- automatic check: no two parts may touch, and the panel says so if they do
 
 ## Install
 
@@ -41,29 +51,41 @@ Zero overlap in all three, checked automatically.
    **macOS**: double-click `install-mac.command` (blocked? right-click > Open)
 4. Restart Illustrator → **Window > Extensions > MXNestSpirit**
 
-Illustrator CC 2014 and newer, Windows and macOS.
+Illustrator CC 2014 and newer.
 
 ### Security — please read before installing
 
-The installer turns on `PlayerDebugMode`, the Illustrator setting that allows
-**unsigned** extensions to load. Commercial plugins avoid this by buying a code
-signing certificate; free projects generally do not.
+The installer turns on `PlayerDebugMode`, the Illustrator setting that lets
+**unsigned** extensions load. Commercial plugins avoid this by buying a code
+signing certificate; free projects generally don't. Once enabled it applies to
+every extension, not just this one — so keep installing only extensions whose
+source you can read.
 
-Once enabled, the setting applies to every extension, not just this one — so
-keep installing only extensions whose source you can read.
-
-This one does nothing hidden: it reads the paths of your open document,
+The panel itself does nothing hidden: it reads the paths of your open document,
 computes, moves the objects, draws circles on a layer. It never accesses the
-network, never opens another file, never sends anything anywhere. All of it is
-plain readable text in this repository — nothing compiled.
+network and never sends anything anywhere. Every line of it is readable text in
+this repository.
+
+One exception you should know about: `bin/sparrow.exe` is a **compiled binary**,
+not source. It is a build of [Sparrow](https://github.com/JeroenGar/sparrow),
+MIT licensed. If you would rather not run a binary you didn't build yourself,
+either delete it — the panel falls back to the built-in engine — or build
+Sparrow from the official repository and replace the file.
 
 ## How to use
 
-**Analyse → Nesting → Apply → Add marks.**
+**Analyse → Full nesting → Apply → Add marks.**
 
 `Ctrl+Z` undoes the whole nest in one step.
 
-Changed a setting? Run Nesting again. Changed the document? Run Analyse again.
+Changed a setting? Run nesting again. Changed the document? Analyse again.
+
+Two buttons:
+
+- **Full nesting** — Sparrow searches, the built-in engine stands by as a
+  fallback. One to two minutes, and the one that saves vinyl.
+- **Nesting V10 only** — the built-in engine alone, a few seconds, for a quick
+  look.
 
 ### Settings that matter
 
@@ -77,8 +99,8 @@ Changed a setting? Run Nesting again. Changed the document? Run Analyse again.
 
 ### When nothing is found
 
-Click **What's in this file?** — it lists the spot colours and the stroke
-colours actually present. Then select one cut contour in Illustrator and choose
+Click **What's in this file?** — it lists the spot colours and the stroke colours
+actually present. Then select one cut contour in Illustrator and choose
 "Same colour as the selected path".
 
 ## How a part is recognised
@@ -97,7 +119,7 @@ mask: whatever falls outside the mask is not printed, so it does not count.
 
 Filled circle, filled square, or corner L. Size, inset and line width
 adjustable, drawn on a locked `Regmark` layer after nesting — they take no space
-in the calculation, and the tool warns you if a part covers one.
+in the calculation, and the panel warns you if a part covers one.
 
 Two presets carry real figures:
 
@@ -105,35 +127,41 @@ Two presets carry real figures:
 - **Graphtec CE7000 / FC9000** — corner L marks, 20 mm, 1 mm line. The manual
   allows 5 to 20 mm and 0.3 to 1.0 mm, and requires a single line
 
-Summa, Zünd, Roland and Gerber are deliberately left blank. Nothing is guessed
+Summa, Zünd, Roland and Gerber are left blank on purpose. Nothing is guessed
 here: a mark of the wrong size is invisible on screen and ruins a printed sheet.
 Set it once from a validated file, then click Remember.
 
 ## Inside
 
-Contours are flattened to 0.08 mm with no simplification at all — that is what
-keeps parts from being distorted. They are then rasterised into a bitmask
-processed 32 pixels at a time.
+Contours are flattened to 0.08 mm with no simplification — that is what keeps
+parts from being distorted. The built-in engine rasterises them into a bitmask
+processed 32 pixels at a time, and places each part by true-shape
+bottom-left-fill: the part falls toward the start of the roll, then slides left,
+testing the real outline, so it settles into its neighbours' hollows.
 
-Placement is a true-shape bottom-left-fill: each part falls toward the start of
-the roll then slides left, testing the real outline. It settles into the hollows
-of its neighbours rather than merely beside them.
+Sparrow works differently: it places everything, then repeatedly shakes the
+layout and compresses the strip — which is why it finds shorter sheets. The
+bridge feeds it simplified geometry, and gives the simplification back to the
+blade gap, so the real spacing is never smaller than you asked for.
 
-The blade gap comes from dilating the footprint already placed, never from
-shrinking the part: the geometry applied in Illustrator is exactly yours.
-
-The engine runs inside the panel — in Chrome, not in Illustrator's scripting
-engine. Same code, 30 to 50 times faster. Illustrator only reads the parts and
-puts them back down.
+The panel runs in Chrome, not in Illustrator's scripting engine: same code,
+30 to 50 times faster. Illustrator only reads the parts and puts them back.
 
 ## Known limits
 
-- a part wider than the roll is rotated automatically; if it still does not fit,
+- Sparrow is Windows-only in this release
+- a part wider than the roll is rotated automatically; if it still doesn't fit,
   it is reported and left in place
 - no automatic mirroring: a left/right kit keeps both parts
 - no production report, and no manual touch-up after nesting yet
 - on a fully flattened PDF with no contours and no groups, part detection stays
-  approximate — and no tool on the market does better on that input
+  approximate — no tool on the market does better on that input
+
+## Credits
+
+- [Sparrow](https://github.com/JeroenGar/sparrow) — Jeroen Gardeyn, KU Leuven, MIT
+- [jagua-rs](https://github.com/JeroenGar/jagua-rs) — collision engine, MIT
+- [Clipper](http://www.angusj.com/delphi/clipper.php) — polygon operations, Boost
 
 ## Licence
 

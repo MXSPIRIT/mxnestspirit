@@ -1,39 +1,49 @@
 # MXNestSpirit
 
-[English version](README.md)
-
 Imbrication true-shape pour Adobe Illustrator, pensée pour les kits déco moto.
 Gratuite, libre, faite dans un atelier qui produit des kits depuis 2009.
 
-**MX Spirit — Montpellier**
+**MX Spirit — Montpellier** · [English version](README.md)
 
 ---
+
+## Nouveau en 1.1 — le moteur Sparrow
+
+La version 1.0 avait un seul moteur, le mien. Il tenait la comparaison avec
+eCut sur un kit réel : 0,826 m contre 0,829 m.
+
+La 1.1 ajoute un second moteur, **Sparrow**, issu de la recherche universitaire
+(KU Leuven), état de l'art pour l'imbrication de formes irrégulières, sous
+licence MIT. Les deux travaillent sur le même kit, la planche la plus courte
+gagne.
+
+Sur un kit réel de 83 pièces :
+
+| Moteur | Métrage |
+|---|---|
+| Moteur intégré | 0,800 m |
+| **Sparrow** | **0,721 m** |
+
+**Environ 10 cm gagnés par planche, soit 10 %.** Sur cent kits, dix mètres de
+vinyle.
+
+> **Sparrow ne fonctionne que sous Windows** dans cette version : le solveur
+> fourni est un exécutable Windows. Sur Mac, le panneau retombe sur le moteur
+> intégré — tout marche, mais sans les 10 % de gain. Une compilation macOS, ou
+> la version WebAssembly de Sparrow, réglerait ça. Contributions bienvenues.
 
 ## Ce que ça fait
 
 Ça pose tes pièces sur la laize en suivant leur **vrai contour**, pas leur boîte
-englobante. Chaque pièce reste un bloc : tracé de coupe, masque d'écrêtage,
-logos, tout pivote ensemble.
+englobante. Chaque pièce reste un bloc : tracé de coupe, masque d'écrêtage et
+logos pivotent ensemble.
 
 - rotation libre au pas de 5 à 30°, ou bloquée pour les dégradés
 - écart de lame et marge de bord garantis, jamais rabotés
 - les petites pièces vont se loger dans les creux et dans les trous des grandes
-- emboîtement des pièces deux par deux, conservé seulement s'il fait gagner
 - repères de découpe posés après coup, sur un calque à part
-- contrôle automatique : le script vérifie qu'aucune pièce n'en touche une autre
-
-## Résultat mesuré
-
-Kit Husqvarna réel, 16 pièces, laize 1350 mm, écart 1 mm :
-
-| | Métrage | Remplissage | Temps |
-|---|---|---|---|
-| Recherche rapide | 0,862 m | 61,4 % | 2 s |
-| Recherche normale | 0,830 m | 63,7 % | 5 s |
-| Recherche maximale | **0,826 m** | 64,1 % | 36 s |
-| eCut (référence payante) | 0,829 m | — | — |
-
-Zéro chevauchement dans les trois cas, contrôlé automatiquement.
+- contrôle automatique : aucune pièce ne doit en toucher une autre, et le
+  panneau te le dit si c'est le cas
 
 ## Installation
 
@@ -43,27 +53,51 @@ Zéro chevauchement dans les trois cas, contrôlé automatiquement.
    **Mac** : double-clic sur `install-mac.command` (si refus : clic droit > Ouvrir)
 4. Relance Illustrator → **Fenêtre > Extensions > MXNestSpirit**
 
-Illustrator CC 2014 et plus récent, Windows et Mac.
-Le script autorise les extensions non signées (`PlayerDebugMode`) et copie le
-panneau dans le dossier des extensions CEP. À faire une fois par machine.
+Illustrator CC 2014 et plus récent.
+
+### Sécurité — à lire avant d'installer
+
+L'installeur active `PlayerDebugMode`, le réglage qui autorise Illustrator à
+charger des extensions **non signées**. Les plugins payants évitent ça en
+achetant un certificat de signature ; les projets gratuits, non. Une fois
+activé, le réglage vaut pour toutes les extensions, pas seulement celle-ci —
+donc n'installe que des extensions dont tu peux lire le code.
+
+Le panneau ne fait rien de caché : il lit les tracés du document ouvert, calcule,
+déplace les objets, dessine des ronds sur un calque. Il ne va jamais sur
+Internet et n'envoie rien nulle part. Tout est du texte lisible dans ce dépôt.
+
+Une exception à connaître : `bin/sparrow.exe` est un **binaire compilé**, pas du
+source. C'est une compilation de [Sparrow](https://github.com/JeroenGar/sparrow),
+sous licence MIT. Si tu préfères ne pas lancer un binaire que tu n'as pas
+compilé toi-même, supprime-le — le panneau retombe sur le moteur intégré — ou
+compile Sparrow depuis son dépôt officiel et remplace le fichier.
 
 ## Utilisation
 
-**Analyser → Imbriquer → Appliquer → Poser les repères.**
+**Analyser → Nesting complet → Appliquer → Poser les repères.**
 
 `Ctrl+Z` annule toute l'imbrication d'un coup.
 
-Si tu changes un réglage, reprends à Imbriquer. Si tu touches au document,
-reprends à Analyser.
+Tu changes un réglage ? Relance le nesting. Tu touches au document ? Relance
+l'analyse.
 
-### Réglages qui comptent
+Deux boutons :
+
+- **Nesting complet** — Sparrow cherche, le moteur intégré reste en secours.
+  Une à deux minutes, et c'est lui qui économise du vinyle.
+- **Nesting V10 seul** — le moteur intégré seul, quelques secondes, pour un
+  aperçu rapide.
+
+### Les réglages qui comptent
 
 | Réglage | Conseil |
 |---|---|
 | Écart lame | 1 mm si ta découpe est bien calée, 2 mm sinon |
 | Précision | 1 mm. En 2 mm, le quadrillage rajoute à lui seul 2 mm de vide entre les pièces |
-| Rotation | pas 10°. Au-delà, plus de gain mesurable |
+| Rotation | tous les 10°. Au-delà, plus de gain mesurable |
 | Recherche | Normale au quotidien, Maximale sur les gros kits |
+| Longueur max | 0 pour un rouleau libre, ou une valeur pour brider la planche |
 
 ### Si aucune pièce n'est trouvée
 
@@ -86,45 +120,51 @@ par le masque : ce qui dépasse n'est pas imprimé, donc ne compte pas.
 ## Repères de découpe
 
 Rond plein, carré plein ou angle en L. Taille, retrait et épaisseur réglables,
-posés sur un calque `Regmark` verrouillé, après l'imbrication — ils ne mangent
-pas de place dans le calcul, et le script prévient si une pièce en recouvre un.
+posés sur un calque `Regmark` verrouillé après l'imbrication — ils ne mangent pas
+de place dans le calcul, et le panneau prévient si une pièce en recouvre un.
 
-Deux presets fournis, et deux seulement :
+Deux préréglages portent de vraies cotes :
 
 - **Valiani** : ronds 10 mm, relevés sur des planches de production
-- **Graphtec CE7000 / FC9000** : angles en L, 20 mm, trait 1 mm — le manuel
+- **Graphtec CE7000 / FC9000** : angles en L, 20 mm, trait 1 mm. Le manuel
   autorise 5 à 20 mm et 0,3 à 1,0 mm, et impose une ligne unique
 
-Pour les autres machines, rien n'est deviné : règle une fois d'après un fichier
-validé et clique **Mémoriser**. Un repère de la mauvaise taille est invisible à
-l'écran et fatal au massicot, après impression.
+Summa, Zünd, Roland et Gerber sont volontairement vides. Rien n'est deviné ici :
+un repère de la mauvaise taille est invisible à l'écran et fait rater une
+planche imprimée. Règle une fois d'après un fichier validé, puis Mémoriser.
 
 ## Comment ça marche dedans
 
 Le contour est aplati à 0,08 mm près, sans aucune simplification — c'est ce qui
-évite les pièces déformées. Il est ensuite rastérisé en masque de bits, traité
-32 pixels à la fois.
+évite les pièces déformées. Le moteur intégré le rastérise en masque de bits
+traité 32 pixels à la fois, et pose chaque pièce en *bottom-left-fill* true-shape :
+elle tombe vers le début du rouleau puis glisse à gauche en testant le contour
+réel, donc elle entre dans les creux de ses voisines.
 
-Le placement est un *bottom-left-fill* true-shape : chaque pièce tombe vers le
-début du rouleau puis glisse à gauche, en testant le contour réel. Elle entre
-donc dans les creux des autres pièces, pas seulement à côté.
+Sparrow procède autrement : il pose tout, puis secoue la planche et la comprime,
+encore et encore. C'est pour ça qu'il trouve plus court. Le pont lui envoie une
+géométrie simplifiée, et rend cette simplification à l'écart de lame — l'écart
+réel n'est donc jamais inférieur à celui demandé.
 
-L'écart de lame s'obtient en dilatant l'empreinte déjà posée, jamais en
-déformant la pièce : la géométrie appliquée dans Illustrator est exactement la
-tienne.
-
-Le moteur tourne dans le panneau, donc dans Chrome, pas dans l'interpréteur
-d'Illustrator — 30 à 50 fois plus rapide à code identique. Illustrator ne fait
-que lire les pièces et les reposer.
+Le panneau tourne dans Chrome, pas dans le moteur de script d'Illustrator : même
+code, 30 à 50 fois plus rapide. Illustrator ne fait que lire les pièces et les
+reposer.
 
 ## Limites connues
 
+- Sparrow est réservé à Windows dans cette version
 - une pièce plus large que la laize est tournée automatiquement ; si elle ne
   passe toujours pas, elle est signalée et laissée en place
 - pas de miroir automatique : un kit gauche/droite garde ses deux pièces
-- pas encore de rapport de production, ni de retouche manuelle après coup
+- pas encore de rapport de production ni de retouche manuelle après coup
 - sur un PDF entièrement aplati, sans contour ni groupe, la reconnaissance des
-  pièces reste approximative — aucun outil du marché ne s'en sort mieux
+  pièces reste approximative — aucun outil du marché ne fait mieux là-dessus
+
+## Crédits
+
+- [Sparrow](https://github.com/JeroenGar/sparrow) — Jeroen Gardeyn, KU Leuven, MIT
+- [jagua-rs](https://github.com/JeroenGar/jagua-rs) — moteur de collision, MIT
+- [Clipper](http://www.angusj.com/delphi/clipper.php) — opérations sur polygones, Boost
 
 ## Licence
 
