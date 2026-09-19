@@ -7,6 +7,24 @@ Free, open source, written in a workshop that has been producing kits since 2009
 
 ---
 
+## What's new in 2.0
+
+**Bleed.** Enlarges a part's clipping mask by a few millimetres so the artwork
+runs past the cut line — no white edge if the blade drifts. It follows your
+selection: select parts and only those are treated, select nothing and the whole
+document is. The bleed is added to the blade gap automatically, because two
+parts that each overhang by 2 mm need 4 mm more between them.
+
+**Finishing tools moved under the preview**, in the order you actually work:
+look at the sheet, approve it, then add marks and bleed.
+
+**Wide layout.** Widen the panel and it splits in two: what you look at on the
+left, what you click on the right.
+
+**Document watch.** The panel now notices when you switch documents and drops
+the stale analysis instead of applying a plan computed on another file — that
+was the cause of the "missing parts" reports.
+
 ## What's new in 1.1 — the Sparrow engine
 
 Version 1.0 shipped with one engine of my own: a raster true-shape nester. It
@@ -87,6 +105,9 @@ Two buttons:
 - **Nesting V10 only** — the built-in engine alone, a few seconds, for a quick
   look.
 
+While Sparrow works, the panel shows the best sheet length it has reached so
+far, updated live from the solver's own progress.
+
 ### Settings that matter
 
 | Setting | Advice |
@@ -114,6 +135,21 @@ Per part, in order:
 
 "Tighten to artwork" forces the silhouette instead of the mask, bounded by the
 mask: whatever falls outside the mask is not printed, so it does not count.
+
+## Bleed
+
+Set a value in millimetres and click **Add bleed**. The part's clipping mask is
+enlarged by that amount, so the printed artwork runs past the cut contour. The
+cut line itself never moves — the blade still cuts where you drew it.
+
+It works on your **selection** if you have one, on the whole document if you
+don't. A part with no clipping mask is left untouched and reported: with no
+mask there is nothing to enlarge, and stretching the artwork itself would
+distort it.
+
+Keep **Count in the gap** ticked unless you know what you are doing. Two
+neighbouring parts that each overhang by 2 mm need 4 mm more between them, or
+one part's bleed prints over the other's cut.
 
 ## Registration marks
 
