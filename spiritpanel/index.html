@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>MXNestSpirit</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header>
+  <span class="mark">MXNestSpirit</span>
+  <select id="lang" style="width:auto;margin-left:auto;background:var(--field);color:var(--ink);border:1px solid var(--line);border-radius:2px;font-size:11px"><option value="fr">FR</option><option value="en">EN</option></select>
+  <span id="hostinfo" class="host" style="margin-left:8px">connexion…</span>
+</header>
+
+<div class="cols">
+<div class="left">
+<section class="result" id="result">
+  <div class="metrage"><span id="len">—</span><em>m</em></div>
+  <dl>
+    <div><dt data-i18n="hdr.width">laize</dt><dd id="wid">1350 mm</dd></div>
+    <div><dt data-i18n="hdr.fill">remplissage</dt><dd id="fill">—</dd></div>
+    <div><dt data-i18n="hdr.waste">chute</dt><dd id="waste">—</dd></div>
+  </dl>
+</section>
+
+<canvas id="preview" width="600" height="600"></canvas>
+<p class="hint" id="hint">Ouvre ton kit, puis analyse le document.</p>
+<section class="pane finitions">
+  <div class="row"><label data-i18n="lbl.finish">Finitions — après validation de la planche</label></div>
+  <div class="row" style="margin-top:8px">
+    <label for="mpreset" data-i18n="lbl.mpreset">Repères — machine</label>
+    <select id="mpreset">
+      <option value="valiani" data-i18n="m.valiani">Valiani — ronds 10 mm</option>
+      <option value="graphtec" data-i18n="m.graphtec">Graphtec CE7000 / FC9000 — angles en L</option>
+      <option value="summa" data-i18n="m.summa">Summa — à régler</option>
+      <option value="zund" data-i18n="m.zund">Zünd — à régler</option>
+      <option value="roland" data-i18n="m.roland">Roland — à régler</option>
+      <option value="gerber" data-i18n="m.gerber">Gerber Edge — à régler</option>
+      <option value="autre" data-i18n="m.autre">Autre machine — à régler</option>
+    </select>
+  </div>
+  <div class="grid3">
+    <div><label for="mshape" data-i18n="lbl.mshape">Forme</label>
+      <select id="mshape">
+        <option value="circle" data-i18n="shape.circle">Rond plein</option>
+        <option value="square" data-i18n="shape.square">Carré plein</option>
+        <option value="corner" data-i18n="shape.corner">Angle en L</option>
+      </select>
+    </div>
+    <div><label for="markd" data-i18n="lbl.markd">Taille (mm)</label><input id="markd" type="number" value="10" min="2" step="1"></div>
+    <div><label for="marki" data-i18n="lbl.marki">Retrait bord (mm)</label><input id="marki" type="number" value="10" min="0" step="1"></div>
+  </div>
+  <div class="grid3">
+    <div><label for="markw" data-i18n="lbl.markw">Trait (mm, angles)</label><input id="markw" type="number" value="1" min="0.3" max="1" step="0.1"></div>
+    <div><label>&nbsp;</label><button id="marks" class="ghost" style="width:100%" data-i18n="btn.marks">Poser les repères</button></div>
+    <div><label>&nbsp;</label><button id="msave" class="ghost" style="width:100%" data-i18n="btn.save">Mémoriser</button></div>
+  </div>
+
+  <div class="grid3" style="border-top:1px solid var(--line-soft);padding-top:10px">
+    <div><label for="bleed" data-i18n="lbl.bleed">Fond perdu (mm) — sélection</label>
+      <input id="bleed" type="number" value="0" min="0" max="10" step="0.5"></div>
+    <div><label>&nbsp;</label>
+      <button id="dobleed" class="ghost" style="width:100%" data-i18n="btn.bleed" title="Sur la sélection si tu en as une, sinon tout le document">Ajouter le fond perdu</button></div>
+    <div><label>&nbsp;</label>
+      <label class="check" style="margin:0;padding:5px 0"><input id="bleedgap" type="checkbox" checked>
+        <span data-i18n="chk.bleedgap">Compter dans l'écart</span></label></div>
+  </div>
+</section>
+
+
+</div>
+<div class="side">
+<section class="pane">
+  <div class="grid3">
+    <div><label for="sheet" data-i18n="lbl.sheet">Laize (mm)</label><input id="sheet" type="number" value="1350" min="50" step="10"></div>
+    <div><label for="gap" data-i18n="lbl.gap">Écart lame (mm)</label><input id="gap" type="number" value="2" min="0" step="0.5"></div>
+    <div><label for="edge" data-i18n="lbl.edge">Marge bord (mm)</label><input id="edge" type="number" value="5" min="0" step="1"></div>
+  </div>
+  <div class="grid3">
+    <div><label for="maxlen" data-i18n="lbl.maxlen">Long. max (mm)</label><input id="maxlen" type="number" value="0" min="0" step="100"></div>
+  </div>
+  <div class="grid3">
+    <div><label for="rot" data-i18n="lbl.rot">Rotation</label>
+      <select id="rot">
+        <option value="5" data-i18n="rot.5">Tous les 5°</option>
+        <option value="10" selected data-i18n="rot.10">Tous les 10°</option>
+        <option value="15" data-i18n="rot.15">Tous les 15°</option>
+        <option value="30" data-i18n="rot.30">Tous les 30°</option>
+        <option value="90" data-i18n="rot.90">Quart de tour seulement</option>
+        <option value="0" data-i18n="rot.0">Aucune rotation</option>
+      </select>
+    </div>
+    <div><label for="prec" data-i18n="lbl.prec">Précision</label>
+      <select id="prec">
+        <option value="1" selected data-i18n="prec.1">1 mm</option>
+        <option value="2" data-i18n="prec.05">0,5 mm</option>
+        <option value="0.5" data-i18n="prec.2">2 mm</option>
+      </select>
+    </div>
+    <div><label for="effort" data-i18n="lbl.effort">Recherche</label>
+      <select id="effort">
+        <option value="8" data-i18n="eff.fast">Rapide</option>
+        <option value="16" selected data-i18n="eff.normal">Normale</option>
+        <option value="100" data-i18n="eff.max">Maximale (le plus serré)</option>
+      </select>
+    </div>
+  </div>
+  <div class="row">
+    <label for="mode" data-i18n="lbl.mode">Reconnaissance des pièces</label>
+    <select id="mode">
+      <option value="auto" selected data-i18n="mode.auto">Automatique</option>
+      <option value="color" data-i18n="mode.color">Même couleur que le tracé sélectionné</option>
+      <option value="spot" data-i18n="mode.spot">Ton direct nommé</option>
+    </select>
+  </div>
+  <div class="row" id="namesrow" style="display:none">
+    <label for="cutnames" data-i18n="lbl.cutnames">Noms acceptés</label>
+    <input id="cutnames" type="text" value="CutContour, Cut, Découpe, Thru-cut">
+  </div>
+  <label class="check"><input id="refine" type="checkbox" data-i18n-next="chk.refine"> <span data-i18n="chk.refine">Affinage après calcul (10 à 15 s de plus, gagne 1 fois sur 7)</span></label>
+  <label class="check"><input id="pairs" type="checkbox" data-i18n-next="chk.pairs"> <span data-i18n="chk.pairs">Emboîter les pièces deux par deux (lent, gagne rarement)</span></label>
+  <label class="check"><input id="holes" type="checkbox" checked data-i18n-next="chk.holes"> <span data-i18n="chk.holes">Boucher les creux avec les petites pièces</span></label>
+  <label class="check"><input id="regroup" type="checkbox" checked data-i18n-next="chk.regroup"> <span data-i18n="chk.regroup">Rattacher les visuels à leur contour</span></label>
+  <label class="check"><input id="tight" type="checkbox" data-i18n-next="chk.tight"> <span data-i18n="chk.tight">Serrer au dessin plutôt qu'au masque</span></label>
+  <label class="check"><input id="selonly" type="checkbox" data-i18n-next="chk.selonly"> <span data-i18n="chk.selonly">Uniquement la sélection</span></label>
+  <label class="check"><input id="fitab" type="checkbox" checked data-i18n-next="chk.fitab"> <span data-i18n="chk.fitab">Ajuster le plan de travail au métrage</span></label>
+</section>
+
+<section class="actions">
+  <button id="scan" class="ghost" data-i18n="btn.scan">Analyser</button>
+  <button id="diag" class="ghost" data-i18n="btn.diag">Que contient le fichier ?</button>
+  <button id="run" class="ghost" disabled data-i18n="btn.run">Nesting V10 seul</button>
+  <button id="hybrid" class="primary" disabled title="Sparrow + V10 en secours" data-i18n="btn.hybrid">Nesting complet</button>
+  <button id="apply" class="ghost" disabled data-i18n="btn.apply">Appliquer</button>
+</section>
+<pre id="log"></pre>
+</div>
+</div>
+
+
+<script src="js/CSInterface.js"></script>
+<script src="js/clipper.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/main.js"></script>
+<!-- Sparrow bridge + process runner MUST load before hybrid.js. -->
+<script src="js/sparrow.js"></script>
+<script src="js/sparrow-run.js"></script>
+<script src="js/hybrid.js"></script>
+</body>
+</html>
