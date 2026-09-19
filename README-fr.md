@@ -7,6 +7,26 @@ Gratuite, libre, faite dans un atelier qui produit des kits depuis 2009.
 
 ---
 
+## Nouveau en 2.0
+
+**Le fond perdu.** Il élargit le masque d'écrêtage d'une pièce de quelques
+millimètres, pour que le dessin déborde derrière le tracé de coupe — plus de
+liseré blanc si la lame dévie d'un cheveu. Il suit ta sélection : tu
+sélectionnes des pièces, seules celles-là sont traitées ; tu ne sélectionnes
+rien, c'est tout le document. Le fond perdu s'ajoute automatiquement à l'écart
+de lame, parce que deux pièces qui débordent chacune de 2 mm doivent s'écarter
+de 4 mm de plus.
+
+**Les finitions sont passées sous l'aperçu**, dans l'ordre réel du travail : tu
+regardes la planche, elle te convient, tu poses tes repères et ton fond perdu.
+
+**Mise en page large.** Élargis le panneau et il se coupe en deux : à gauche ce
+que tu regardes, à droite ce sur quoi tu cliques.
+
+**Surveillance du document.** Le panneau repère maintenant que tu as changé de
+fichier et jette l'analyse périmée, au lieu d'appliquer un plan calculé sur un
+autre document — c'était la cause des « pièces oubliées ».
+
 ## Nouveau en 1.1 — le moteur Sparrow
 
 La version 1.0 avait un seul moteur, le mien. Il tenait la comparaison avec
@@ -89,6 +109,9 @@ Deux boutons :
 - **Nesting V10 seul** — le moteur intégré seul, quelques secondes, pour un
   aperçu rapide.
 
+Pendant que Sparrow travaille, le panneau affiche le meilleur métrage atteint,
+mis à jour en direct d'après ce que le solveur annonce.
+
 ### Les réglages qui comptent
 
 | Réglage | Conseil |
@@ -116,6 +139,21 @@ Dans l'ordre, par pièce :
 
 L'option « Serrer au dessin » force la silhouette plutôt que le masque, bornée
 par le masque : ce qui dépasse n'est pas imprimé, donc ne compte pas.
+
+## Fond perdu
+
+Tu mets une valeur en millimètres et tu cliques **Ajouter le fond perdu**. Le
+masque d'écrêtage de la pièce est élargi d'autant, donc le dessin imprimé
+déborde du tracé de coupe. Le tracé de coupe, lui, ne bouge jamais : la lame
+coupe toujours là où tu l'as dessiné.
+
+Ça travaille sur ta **sélection** si tu en as une, sur tout le document sinon.
+Une pièce sans masque d'écrêtage est laissée telle quelle et signalée : sans
+masque il n'y a rien à élargir, et étirer le dessin lui-même le déformerait.
+
+Laisse **Compter dans l'écart** cochée, sauf si tu sais ce que tu fais. Deux
+pièces voisines qui débordent chacune de 2 mm doivent s'écarter de 4 mm de
+plus, sinon le fond perdu de l'une s'imprime sur la découpe de l'autre.
 
 ## Repères de découpe
 
