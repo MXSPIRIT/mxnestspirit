@@ -676,7 +676,44 @@
        * across host versions, and a solver that dies must not hang the panel. */
       var deadline = Date.now() + (seconds + 30) * 1000;
       var sawExit = 0, badParse = 0, lastGood = null, lastSig = 0;
+      /* Journal d'arrêt : une seule ligne, au premier tour, pour dire ce que le
+         pont voit réellement du bouton Stop. Deux corrections « sûres » ont
+         échoué faute de savoir lequel des trois maillons cassait — le panneau
+         qui n'expose pas la fonction, la fonction qui répond faux, ou le
+         processus qui refuse d'être tué. */
+      var stopDiagDone = false, stopSeen = false;
       var timer = setInterval(function () {
+        if (!stopDiagDone) {
+          stopDiagDone = true;
+          var dispo = !!(typeof window !== 'undefined' && window.MXNestSpirit &&
+                         typeof window.MXNestSpirit.isCancelled === 'function');
+          var peutTuer = !!(proc && typeof proc.terminate === 'function');
+          /* On ne le dit plus que si quelque chose manque : quand tout va bien,
+             cette ligne n'apprend rien et encombre le journal. */
+          if ((!dispo || !peutTuer) && o.onLog) {
+            o.onLog('[STOP] fonction d\'arrêt visible : ' + (dispo ? 'OUI' : 'NON') +
+                    ' · terminaison possible : ' + (peutTuer ? 'OUI' : 'NON'));
+          }
+        }
+        /* ARRÊT DEMANDÉ — testé EN PREMIER.
+         * Il était placé en fin de tour, après un bloc qui sort de la boucle
+         * dès qu'un fichier de solution existe : autant dire qu'il n'était
+         * jamais atteint, et que le bouton Stop ne servait à rien. */
+        if (typeof window !== 'undefined' && window.MXNestSpirit &&
+            window.MXNestSpirit.isCancelled && window.MXNestSpirit.isCancelled()) {
+          clearInterval(timer);
+          var tue = 'non tenté';
+          try {
+            if (proc && typeof proc.terminate === 'function') { proc.terminate(pid); tue = 'terminate() appelé'; }
+            else if (proc && typeof proc.killPid === 'function') { proc.killPid(pid); tue = 'killPid() appelé'; }
+            else tue = 'aucune méthode de terminaison';
+          } catch (eK) { tue = 'échec : ' + String(eK); }
+          if (o.onLog) o.onLog('[STOP] arrêt pris en compte · ' + tue +
+                               ' · solution en réserve : ' + (lastGood ? 'oui' : 'non'));
+          if (lastGood) { resolve(lastGood); return; }
+          reject(new Error('SOLVER_CANCELLED'));
+          return;
+        }
         var running = true;
         if (winMarks) {
           /* The .bat's own last line, not CEP's isRunning (see winMarks). */

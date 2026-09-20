@@ -446,7 +446,13 @@ var MXNest = (function () {
     for (var k = 0; k < part.rings.length; k++) rings.push(rotatePoly(part.rings[k], rad));
     var bb = bboxOf(rings);
     var wpx = (bb[2] - bb[0]) * res, hpx = (bb[3] - bb[1]) * res;
-    if (wpx * hpx > 4000000) return null;          // garde-fou mémoire
+    /* Garde-fou mémoire : une empreinte démesurée est refusée pour CET angle.
+       Surtout ne pas la redimensionner à une autre finesse : son quadrillage ne
+       correspondrait plus à celui de la feuille, les positions seraient fausses
+       et les pièces se chevaucheraient. Essayé, mesuré, jeté — huit contacts.
+       Refuser l'angle est sans danger : les autres restent disponibles, et si
+       aucun ne passe la pièce est signalée non placée, pas perdue en silence. */
+    if (wpx * hpx > 4000000) return null;
     var m = makeMask(rings, res, gapPx, part.union);
     m.angle = angle;
     return m;
@@ -709,11 +715,13 @@ var MXNest = (function () {
       if (i === skip) continue;
       var P = list[i];
       var m = maskFor(P.part, P.angle, res, gapPx);
-      if (!m) continue;
+      /* Une pièce qu'on ne sait pas marquer laisserait sa place libre : le
+         compactage poserait une voisine par-dessus. On renonce plutôt. */
+      if (!m) return null;
       var ox = Math.round((P.x - opt.edgeMargin - (m.bbox[0] - m.offX)) * res) + pad;
       var oy = Math.round((P.y - opt.edgeMargin - (m.bbox[1] - m.offY)) * res) + pad;
       if (oy + m.h > sheet.h) sheet.grow(oy + m.h + 128);
-      if (ox < 0 || oy < 0) continue;
+      if (ox < 0 || oy < 0 || ox + m.w > sheet.w || oy + m.h > sheet.h) return null;
       sheet.stamp(dilatedOf(m), ox, oy);
       sheet.updateFront(m, ox, oy);
       if (P.part.rings.length > 1) sheet.hasHoles = true;
@@ -739,6 +747,7 @@ var MXNest = (function () {
       for (var k = 0; k < order.length; k++) {
         var idx = order[k], P = list[idx];
         var sheet = rebuildSheet(list, idx, opt, res, gapPx);
+        if (!sheet) continue;                     /* feuille incomplète : on ne touche à rien */
         var spot = placeOne(sheet, P.part, anglesFor(opt), opt, res, gapPx);
         if (!spot) continue;
         var m = spot.mask;
@@ -799,21 +808,33 @@ var MXNest = (function () {
       var usable = Math.floor(opt.sheetWidth * res) - 2 * Math.round(opt.edgeMargin * res);
       var sheet = new Sheet(usable + 2 * pad, 400 + 2 * pad);
       sheet.setBorders(pad, usable);
-      var kept = [], i;
+      /* TOUTE pièce conservée doit être reconstruite ET marquée sur la feuille.
+       *
+       * Avant, une pièce dont l'empreinte ne pouvait pas être construite — une
+       * grande pièce à précision fine dépasse le garde-fou mémoire — était
+       * sautée : elle disparaissait du plan, et sa place restait libre, donc
+       * une autre pièce venait s'y poser. D'où les deux symptômes vus ensemble,
+       * des pièces manquantes et des contacts.
+       *
+       * Un tour d'affinage qui ne peut pas tout reposer est maintenant
+       * abandonné en bloc : le plan reste celui d'avant, intact. */
+      var kept = [], i, aborted = false;
       for (i = 0; i < n; i++) {
         if (pulled[i]) continue;
         var P = bestList[i];
         var m = maskFor(P.part, P.angle, res, gapPx);
-        if (!m) continue;
+        if (!m) { aborted = true; break; }
         var ox = Math.round((P.x - opt.edgeMargin - (m.bbox[0] - m.offX)) * res) + pad;
         var oy = Math.round((P.y - opt.edgeMargin - (m.bbox[1] - m.offY)) * res) + pad;
-        if (ox < 0 || oy < 0) continue;
+        if (ox < 0 || oy < 0) { aborted = true; break; }
         if (oy + m.h > sheet.h) sheet.grow(oy + m.h + 128);
+        if (ox + m.w > sheet.w || oy + m.h > sheet.h) { aborted = true; break; }
         sheet.stamp(dilatedOf(m), ox, oy);
         sheet.updateFront(m, ox, oy);
         if (P.part.rings.length > 1) sheet.hasHoles = true;
         kept.push(P);
       }
+      if (aborted) continue;
 
       /* on repose les arrachées, les plus grosses d'abord */
       order.sort(function (a, b) { return netArea(bestList[b].part) - netArea(bestList[a].part); });
@@ -855,8 +876,62 @@ var MXNest = (function () {
     return result;
   }
 
+
+  /* ---------- remplissage des vides ----------
+     Une fois la planche calculée, il reste de la chute entre les pièces. On y
+     pose autant de copies d'un même petit motif — un logo, une pastille — que
+     la place le permet, sans jamais toucher aux pièces déjà posées ni allonger
+     la planche.
+
+     On reconstruit la feuille à partir du plan existant, puis on appelle le
+     même placeur que pour les pièces, avec le balayage complet activé : le
+     motif va donc se loger dans les creux fermés, pas seulement sur le front. */
+  function fillFree(result, logo, opt, maxCount) {
+    if (!result || !result.placements.length) return [];
+    var res = opt.resolution;
+    var gapPx = Math.round(opt.gap * res); if (gapPx < 0) gapPx = 0;
+    var pad = gapPx + 2;
+    var usable = Math.floor(opt.sheetWidth * res) - 2 * Math.round(opt.edgeMargin * res);
+    var maxLen = Math.ceil((result.length - opt.edgeMargin) * res) + 2 * pad;
+
+    var sheet = new Sheet(usable + 2 * pad, Math.max(400 + 2 * pad, maxLen));
+    sheet.setBorders(pad, usable);
+    sheet.cap = maxLen;                     /* interdit d'allonger la planche */
+
+    var i, P, m;
+    for (i = 0; i < result.placements.length; i++) {
+      P = result.placements[i];
+      m = maskFor(P.part, P.angle, res, gapPx);
+      if (!m) continue;
+      var ox = Math.round((P.x - opt.edgeMargin - (m.bbox[0] - m.offX)) * res) + pad;
+      var oy = Math.round((P.y - opt.edgeMargin - (m.bbox[1] - m.offY)) * res) + pad;
+      if (ox < 0 || oy < 0) continue;
+      if (oy + m.h > sheet.h) continue;
+      sheet.stamp(dilatedOf(m), ox, oy);
+      sheet.updateFront(m, ox, oy);
+    }
+    sheet.deepScan = true;                  /* on fouille toute la matière posée */
+
+    var angles = anglesFor(opt), out = [], guard = 0;
+    var cap = maxCount || 200;
+    while (out.length < cap && guard++ < cap + 20) {
+      var spot = placeOne(sheet, logo, angles, opt, res, gapPx);
+      if (!spot) break;
+      m = spot.mask;
+      sheet.stamp(dilatedOf(m), spot.x, spot.y);
+      sheet.updateFront(m, spot.x, spot.y);
+      out.push({
+        angle: m.angle,
+        x: ((spot.x - pad) / res) + (m.bbox[0] - m.offX) + opt.edgeMargin,
+        y: ((spot.y - pad) / res) + (m.bbox[1] - m.offY) + opt.edgeMargin,
+        w: m.bbox[2] - m.bbox[0], h: m.bbox[3] - m.bbox[1]
+      });
+    }
+    return out;
+  }
+
   return {
-    nestOnce: nestOnce, compact: compact, ruinRecreate: ruinRecreate, orderings: orderings, verify: verify, buildPairs: buildPairs,
+    nestOnce: nestOnce, fillFree: fillFree, compact: compact, ruinRecreate: ruinRecreate, orderings: orderings, verify: verify, buildPairs: buildPairs,
     safeResolution: safeResolution, netArea: netArea, bboxOf: bboxOf, rotatePoly: rotatePoly
   };
 })();

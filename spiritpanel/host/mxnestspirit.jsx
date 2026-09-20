@@ -835,7 +835,7 @@ function mxnsBleed(payload, session) {
       return false;
     }
 
-    var rows = String(payload).split(';'), done = 0, noMask = 0, skipped = 0;
+    var rows = String(payload).split(';'), done = 0, noMask = 0, skipped = 0, made = 0;
     for (var r = 0; r < rows.length; r++) {
       if (!rows[r]) continue;
       var cut = rows[r].indexOf('|');
@@ -850,9 +850,6 @@ function mxnsBleed(payload, session) {
 
       if (!isSelected(item)) { skipped++; continue; }
 
-      var clip = findClip(item, 0);
-      if (!clip || clip.typename !== 'PathItem') { noMask++; continue; }
-
       var arr = [];
       for (var i = 0; i < pts.length; i++) {
         var xy = pts[i].split(',');
@@ -860,13 +857,519 @@ function mxnsBleed(payload, session) {
         arr.push([parseFloat(xy[0]) * MM, -parseFloat(xy[1]) * MM]);
       }
       if (arr.length < 3) continue;
+
+      var clip = findClip(item, 0);
+      if (clip && clip.typename === 'PathItem') {
+        /* masque déjà là : on réécrit sa géométrie, sans en ajouter un second */
+        try {
+          clip.setEntirePath(arr);
+          clip.closed = true;
+          done++;
+        } catch (eSet) { }
+        continue;
+      }
+
+      /* PAS DE MASQUE : on en crée un. C'est le cas courant en déco — la pièce
+       * a son tracé de coupe et son dessin, mais rien qui écrête. On pose donc
+       * un nouveau tracé, copie de la coupe élargie de X mm, en tête du groupe,
+       * et on le déclare masque. Le tracé de coupe d'origine n'est pas touché :
+       * il reste tel quel, en CutContour, pour la machine. */
+      var host = (item.typename === 'GroupItem') ? item : null;
+      if (!host) { noMask++; continue; }
       try {
-        clip.setEntirePath(arr);
-        clip.closed = true;
-        done++;
-      } catch (eSet) { }
+        var nm = host.pathItems.add();
+        nm.setEntirePath(arr);
+        nm.closed = true;
+        nm.filled = false;
+        nm.stroked = false;
+        nm.name = 'MXN_BLEED_MASK';
+        nm.move(host, ElementPlacement.PLACEATBEGINNING);
+        nm.clipping = true;
+        host.clipped = true;
+        made++;
+      } catch (eNew) { noMask++; }
     }
     app.redraw();
-    return 'OK\t' + done + '\t' + noMask + '\t' + skipped + '\t' + (selOnly.length ? '1' : '0');
+    return 'OK\t' + (done + made) + '\t' + noMask + '\t' + skipped + '\t' +
+           (selOnly.length ? '1' : '0') + '\t' + made;
   } catch (e) { return 'ERR\t' + e + ' (ligne ' + e.line + ')'; }
+}
+
+
+/* ================= remise à zéro =================
+ * Le panneau gardait les références d'objets, la session et les étiquettes
+ * posées dans les notes des calques. Tant que ça traînait, relancer proprement
+ * était impossible autrement qu'en redémarrant Illustrator.
+ */
+function mxnsReset() {
+  try {
+    var n = 0;
+    try { $.global.MXNS_ITEMS = null; } catch (e1) {}
+    try { $.global.MXNS_CUTS = null; } catch (e2) {}
+    try { $.global.MXNS_SESSION = ''; } catch (e3) {}
+    try { $.global.MXNS_DOC = ''; } catch (e4) {}
+    if (app.documents.length) {
+      var doc = app.activeDocument;
+      function strip(it) {
+        try {
+          var nt = String(it.note || '');
+          if (nt.indexOf(TAG) === 0 || nt.indexOf(CUTTAG) === 0 || nt === 'MXNCUT' || nt === 'MXNCLIP') {
+            it.note = '';
+            n++;
+          }
+        } catch (eN) {}
+        if (it.typename === 'GroupItem') {
+          var k = kidsOf(it);
+          for (var i = 0; i < k.length; i++) strip(k[i]);
+        }
+      }
+      for (var L = 0; L < doc.layers.length; L++) {
+        var kids = kidsOf(doc.layers[L]);
+        for (var i = 0; i < kids.length; i++) strip(kids[i]);
+      }
+      app.redraw();
+    }
+    return 'OK\t' + n;
+  } catch (e) { return 'ERR\t' + e; }
+}
+
+/* ================= décalage du contour de coupe =================
+ * C'est le vrai besoin en déco : un tracé de coupe qui suit la silhouette du
+ * visuel, écarté de quelques millimètres — le liseré autour du sticker.
+ * On ne touche donc PAS au dessin : on crée un nouveau tracé, dans le groupe de
+ * la pièce, sous tout le reste, avec le ton direct de coupe existant s'il y en
+ * a un dans le document, sinon un ton direct CutContour créé pour l'occasion.
+ *
+ * Si la pièce a déjà un tracé de coupe et que l'on demande le remplacement, on
+ * réécrit sa géométrie au lieu d'en ajouter un second — sinon la machine
+ * couperait deux fois.
+ *
+ * payload : "uid|x,y x,y ...;..."  millimètres, y vers le bas
+ */
+function mxnsCutOffset(payload, session, mode, cutNamesCsv) {
+  try {
+    if (!app.documents.length) return 'ERR\tAucun document ouvert';
+    var cur = '';
+    try { cur = String($.global.MXNS_SESSION || ''); } catch (eS) {}
+    if (String(session) && cur && String(session) !== cur) {
+      return 'ERR\tCe décalage vient d\'une analyse précédente. Relance Analyser.';
+    }
+    var doc = app.activeDocument;
+    var names = String(cutNamesCsv || 'cutcontour').toLowerCase().split(',');
+    for (var k0 = 0; k0 < names.length; k0++) names[k0] = names[k0].replace(/^\s+|\s+$/g, '');
+    var replace = String(mode) === 'replace';
+
+    /* ton direct de coupe : on réutilise celui du document, sinon on le crée */
+    var spotColor = null;
+    try {
+      for (var sI = 0; sI < doc.spots.length; sI++) {
+        var nm = String(doc.spots[sI].name).replace(/^\s+|\s+$/g, '').toLowerCase();
+        for (var nI = 0; nI < names.length; nI++) {
+          if (nm === names[nI]) {
+            spotColor = new SpotColor();
+            spotColor.spot = doc.spots[sI];
+            spotColor.tint = 100;
+            break;
+          }
+        }
+        if (spotColor) break;
+      }
+      if (!spotColor) {
+        var sp = doc.spots.add();
+        sp.name = 'CutContour';
+        var c = new CMYKColor();
+        c.cyan = 0; c.magenta = 100; c.yellow = 0; c.black = 0;
+        sp.color = c;
+        sp.colorType = ColorModel.SPOT;
+        spotColor = new SpotColor();
+        spotColor.spot = sp;
+        spotColor.tint = 100;
+      }
+    } catch (eSpot) { spotColor = null; }
+
+    /* sélection : même règle que le fond perdu */
+    var selOnly = [];
+    try {
+      if (doc.selection && doc.selection.length) {
+        for (var q = 0; q < doc.selection.length; q++) selOnly.push(doc.selection[q]);
+      }
+    } catch (eSel) { selOnly = []; }
+    function same(a, b) {
+      if (!a || !b) return false;
+      try { if (a === b) return true; } catch (e) {}
+      try {
+        if (a.typename !== b.typename) return false;
+        var ga = a.geometricBounds, gb = b.geometricBounds;
+        return Math.abs(ga[0] - gb[0]) < 0.001 && Math.abs(ga[1] - gb[1]) < 0.001 &&
+               Math.abs(ga[2] - gb[2]) < 0.001 && Math.abs(ga[3] - gb[3]) < 0.001;
+      } catch (e2) { return false; }
+    }
+    function selected(item) {
+      if (!selOnly.length) return true;
+      for (var i = 0; i < selOnly.length; i++) {
+        if (same(item, selOnly[i])) return true;
+        var bag = collect(item, []);
+        for (var b = 0; b < bag.length; b++) if (same(bag[b], selOnly[i])) return true;
+      }
+      return false;
+    }
+
+    var rows = String(payload).split(';'), made = 0, redone = 0, skipped = 0;
+    for (var r = 0; r < rows.length; r++) {
+      if (!rows[r]) continue;
+      var bar = rows[r].indexOf('|');
+      if (bar < 0) continue;
+      var uid = rows[r].substring(0, bar);
+      var pts = rows[r].substring(bar + 1).split(' ');
+
+      var item = null;
+      try { if ($.global.MXNS_ITEMS) item = $.global.MXNS_ITEMS[uid]; } catch (eG) {}
+      if (!item) continue;
+      try { var probe = item.typename; } catch (eDead) { continue; }
+      if (!selected(item)) { skipped++; continue; }
+
+      var arr = [];
+      for (var i2 = 0; i2 < pts.length; i2++) {
+        var xy = pts[i2].split(',');
+        if (xy.length !== 2) continue;
+        arr.push([parseFloat(xy[0]) * MM, -parseFloat(xy[1]) * MM]);
+      }
+      if (arr.length < 3) continue;
+
+      var existing = null;
+      try {
+        var cuts = $.global.MXNS_CUTS ? $.global.MXNS_CUTS[uid] : null;
+        if (cuts && cuts.length && cuts[0].typename === 'PathItem') existing = cuts[0];
+      } catch (eC) {}
+
+      if (replace && existing) {
+        try {
+          existing.setEntirePath(arr);
+          existing.closed = true;
+          redone++;
+        } catch (eR) {}
+        continue;
+      }
+
+      var host = (item.typename === 'GroupItem') ? item : item.parent;
+      var path;
+      try { path = host.pathItems.add(); } catch (eA) { continue; }
+      path.setEntirePath(arr);
+      path.closed = true;
+      path.filled = false;
+      path.stroked = true;
+      path.strokeWidth = 0.25;
+      if (spotColor) path.strokeColor = spotColor;
+      path.name = 'CUT_OFFSET';
+      try { path.move(host, ElementPlacement.PLACEATBEGINNING); } catch (eM) {}
+      made++;
+    }
+    app.redraw();
+    return 'OK\t' + made + '\t' + redone + '\t' + skipped + '\t' + (selOnly.length ? '1' : '0');
+  } catch (e) { return 'ERR\t' + e + ' (ligne ' + e.line + ')'; }
+}
+
+
+/* ================= fond perdu, chemin direct =================
+ * Le fond perdu passait par l'analyse : identifiants de pièces, références
+ * mémorisées, étiquettes dans les notes. Trop de maillons, et un seul qui casse
+ * et rien ne se passe — ce qui arrivait sur les pièces venues d'un PDF alors
+ * qu'un rectangle dessiné à la main fonctionnait.
+ *
+ * Ici, aucun de ces maillons. On lit ce qui est SÉLECTIONNÉ au moment où on
+ * clique, on renvoie les contours, le panneau calcule le décalage, et on
+ * applique dans le MÊME ordre. Rien n'est mémorisé entre les deux appels.
+ */
+
+/* Le tracé qui sert de référence pour une pièce : le ton direct de coupe s'il
+   existe, sinon le masque, sinon le plus grand tracé fermé. */
+function mxn_refPath(item, names) {
+  var bag = collect(item, []), i;
+  for (i = 0; i < bag.length; i++) {
+    if (isCut(bag[i], { mode: 'spot', names: names, key: '' })) return bag[i];
+  }
+  var clip = findClip(item, 0);
+  if (clip && clip.typename === 'PathItem') return clip;
+  var best = null, bestA = -1;
+  for (i = 0; i < bag.length; i++) {
+    try {
+      if (!bag[i].closed) continue;
+      var a = boundsArea(bag[i]);
+      if (a > bestA) { bestA = a; best = bag[i]; }
+    } catch (e) { }
+  }
+  return best;
+}
+
+function mxn_targets(doc) {
+  var out = [], i;
+  if (doc.selection && doc.selection.length) {
+    for (i = 0; i < doc.selection.length; i++) out.push(doc.selection[i]);
+    return out;
+  }
+  for (var L = 0; L < doc.layers.length; L++) {
+    var lay = doc.layers[L];
+    if (lay.locked || !lay.visible) continue;
+    var kids = kidsOf(lay);
+    for (i = 0; i < kids.length; i++) out.push(kids[i]);
+  }
+  /* un seul gros groupe (PDF importé) : on descend dedans */
+  var guard = 0;
+  while (out.length === 1 && out[0].typename === 'GroupItem' && guard++ < 8) {
+    var clipped = false;
+    try { clipped = out[0].clipped; } catch (e) { }
+    if (clipped) break;
+    var k = kidsOf(out[0]);
+    if (k.length < 2) break;
+    out = k;
+  }
+  return out;
+}
+
+/* Renvoie les contours de référence, un par cible, dans l'ordre. */
+function mxnsGetCuts(cutNamesCsv, tol) {
+  try {
+    if (!app.documents.length) return 'ERR\tAucun document ouvert';
+    var doc = app.activeDocument;
+    var names = String(cutNamesCsv || '').toLowerCase().split(',');
+    for (var n = 0; n < names.length; n++) names[n] = names[n].replace(/^\s+|\s+$/g, '');
+    tol = parseFloat(tol) || 0.08;
+
+    var targets = mxn_targets(doc), out = ['OK'], usable = 0;
+    out.push('SEL\t' + ((doc.selection && doc.selection.length) ? '1' : '0'));
+    for (var i = 0; i < targets.length; i++) {
+      var ref = mxn_refPath(targets[i], names);
+      if (!ref) { out.push('P\t' + i + '\t0'); continue; }
+      var subs = (ref.typename === 'CompoundPathItem') ? ref.pathItems : [ref];
+      var rings = [];
+      for (var q = 0; q < subs.length; q++) {
+        var poly = decimate(flatten(subs[q], tol), 3000);
+        if (poly.length > 2) rings.push(poly);
+      }
+      if (!rings.length) { out.push('P\t' + i + '\t0'); continue; }
+      out.push('P\t' + i + '\t' + rings.length);
+      for (var r = 0; r < rings.length; r++) {
+        var buf = [];
+        for (var z = 0; z < rings[r].length; z++) {
+          buf.push((Math.round(rings[r][z][0] * 100) / 100) + ',' + (Math.round(rings[r][z][1] * 100) / 100));
+        }
+        out.push('R\t' + buf.join(' '));
+      }
+      usable++;
+    }
+    out.push('END\t' + targets.length + '\t' + usable);
+    return out.join('\n');
+  } catch (e) { return 'ERR\t' + e + ' (ligne ' + e.line + ')'; }
+}
+
+/* Applique les contours élargis, par INDICE de cible — même ordre qu'à la
+   lecture, recalculé à l'instant, sans rien de mémorisé.
+   mode : 'mask' (le tracé devient le masque) ou 'cut' (nouveau tracé de coupe) */
+function mxnsApplyOffset(payload, mode, cutNamesCsv) {
+  try {
+    if (!app.documents.length) return 'ERR\tAucun document ouvert';
+    var doc = app.activeDocument;
+    var names = String(cutNamesCsv || '').toLowerCase().split(',');
+    for (var n0 = 0; n0 < names.length; n0++) names[n0] = names[n0].replace(/^\s+|\s+$/g, '');
+    var targets = mxn_targets(doc);
+    var asMask = String(mode) === 'mask';
+
+    var spotColor = null;
+    if (!asMask) {
+      try {
+        for (var sI = 0; sI < doc.spots.length; sI++) {
+          var nm = String(doc.spots[sI].name).replace(/^\s+|\s+$/g, '').toLowerCase();
+          for (var nI = 0; nI < names.length; nI++) {
+            if (nm === names[nI]) { spotColor = new SpotColor(); spotColor.spot = doc.spots[sI]; spotColor.tint = 100; break; }
+          }
+          if (spotColor) break;
+        }
+        if (!spotColor) {
+          var sp = doc.spots.add();
+          sp.name = 'CutContour';
+          var cm = new CMYKColor();
+          cm.cyan = 0; cm.magenta = 100; cm.yellow = 0; cm.black = 0;
+          sp.color = cm; sp.colorType = ColorModel.SPOT;
+          spotColor = new SpotColor(); spotColor.spot = sp; spotColor.tint = 100;
+        }
+      } catch (eSpot) { spotColor = null; }
+    }
+
+    var rows = String(payload).split(';'), made = 0, replaced = 0, failed = 0;
+    for (var r = 0; r < rows.length; r++) {
+      if (!rows[r]) continue;
+      var bar = rows[r].indexOf('|');
+      if (bar < 0) continue;
+      var idx = parseInt(rows[r].substring(0, bar), 10);
+      var pts = rows[r].substring(bar + 1).split(' ');
+      if (isNaN(idx) || idx < 0 || idx >= targets.length) { failed++; continue; }
+      var item = targets[idx];
+
+      var arr = [];
+      for (var i = 0; i < pts.length; i++) {
+        var xy = pts[i].split(',');
+        if (xy.length !== 2) continue;
+        arr.push([parseFloat(xy[0]) * MM, -parseFloat(xy[1]) * MM]);
+      }
+      if (arr.length < 3) { failed++; continue; }
+
+      /* Il faut un GROUPE pour porter un masque. Une pièce qui n'en est pas un
+         est emballée dans un groupe créé à la volée, à sa place exacte dans la
+         pile — sinon un tracé isolé ne pourrait jamais recevoir de fond perdu. */
+      var host = item;
+      if (asMask && host.typename !== 'GroupItem') {
+        try {
+          var g = host.parent.groupItems.add();
+          g.move(host, ElementPlacement.PLACEBEFORE);
+          host.move(g, ElementPlacement.PLACEATEND);
+          host = g;
+        } catch (eW) { failed++; continue; }
+      }
+
+      try {
+        if (asMask) {
+          var clip = findClip(host, 0);
+          if (clip && clip.typename === 'PathItem') {
+            clip.setEntirePath(arr);
+            clip.closed = true;
+            replaced++;
+          } else {
+            var nm2 = host.pathItems.add();
+            nm2.setEntirePath(arr);
+            nm2.closed = true;
+            nm2.filled = false;
+            nm2.stroked = false;
+            nm2.name = 'MXN_BLEED_MASK';
+            nm2.move(host, ElementPlacement.PLACEATBEGINNING);
+            nm2.clipping = true;
+            host.clipped = true;
+            made++;
+          }
+        } else {
+          var owner = (host.typename === 'GroupItem') ? host : host.parent;
+          var np = owner.pathItems.add();
+          np.setEntirePath(arr);
+          np.closed = true;
+          np.filled = false;
+          np.stroked = true;
+          np.strokeWidth = 0.25;
+          if (spotColor) np.strokeColor = spotColor;
+          np.name = 'CUT_OFFSET';
+          made++;
+        }
+      } catch (eApply) { failed++; }
+    }
+    app.redraw();
+    return 'OK\t' + made + '\t' + replaced + '\t' + failed + '\t' +
+           ((doc.selection && doc.selection.length) ? '1' : '0');
+  } catch (e) { return 'ERR\t' + e + ' (ligne ' + e.line + ')'; }
+}
+
+
+/* ================= remplissage des vides =================
+ * L'utilisateur sélectionne UN objet — un logo, une pastille, un liseré — et
+ * on en sème des copies dans la chute de la planche. On lit sa silhouette, le
+ * panneau calcule les emplacements libres, et on duplique.
+ *
+ * Les copies partent sur leur propre calque, verrouillable et supprimable d'un
+ * bloc : un remplissage se refait souvent deux ou trois fois avant de tomber
+ * juste, et personne n'a envie de rattraper cinquante copies à la main.
+ */
+function mxnsGetLogo(tol) {
+  try {
+    if (!app.documents.length) return 'ERR\tAucun document ouvert';
+    var doc = app.activeDocument;
+    if (!doc.selection || !doc.selection.length) return 'ERR\tSélectionne le logo à semer.';
+    if (doc.selection.length > 1) return 'ERR\tSélectionne un seul objet.';
+    var item = doc.selection[0];
+    try { $.global.MXNS_LOGO = item; } catch (eSet) {}
+    tol = parseFloat(tol) || 0.08;
+
+    var bag = collect(item, []), rings = [], i;
+    for (i = 0; i < bag.length; i++) {
+      try {
+        if (!bag[i].closed) continue;
+        if (boundsArea(bag[i]) < 1) continue;
+        var poly = decimate(flatten(bag[i], tol), 600);
+        if (poly.length > 2) rings.push(poly);
+      } catch (e) { }
+    }
+    /* rien de vectoriel exploitable (image, texte) : on prend sa boîte */
+    if (!rings.length) {
+      var b = item.geometricBounds;
+      rings.push([[b[0] / MM, -b[1] / MM], [b[2] / MM, -b[1] / MM],
+                  [b[2] / MM, -b[3] / MM], [b[0] / MM, -b[3] / MM]]);
+    }
+    var out = ['OK', 'NAME\t' + String(item.name || item.typename)];
+    for (var r = 0; r < rings.length; r++) {
+      var buf = [];
+      for (var z = 0; z < rings[r].length; z++) {
+        buf.push((Math.round(rings[r][z][0] * 100) / 100) + ',' + (Math.round(rings[r][z][1] * 100) / 100));
+      }
+      out.push('R\t' + buf.join(' '));
+    }
+    out.push('END\t' + rings.length);
+    return out.join('\n');
+  } catch (e) { return 'ERR\t' + e + ' (ligne ' + e.line + ')'; }
+}
+
+/* payload : "angle,x,y;angle,x,y;..."  x,y = coin haut-gauche visé, en mm */
+function mxnsPlaceLogos(payload, layerName) {
+  try {
+    if (!app.documents.length) return 'ERR\tAucun document ouvert';
+    var doc = app.activeDocument;
+    /* La sélection peut avoir été perdue entre la lecture du logo et la pose —
+       un clic dans le document, un panneau qui prend le focus. On garde donc
+       une référence dès la lecture, et on la réutilise ici. */
+    var src = null;
+    try { if ($.global.MXNS_LOGO) src = $.global.MXNS_LOGO; } catch (eG) {}
+    try { if (src) { var probe = src.typename; } } catch (eDead) { src = null; }
+    if (!src && doc.selection && doc.selection.length) src = doc.selection[0];
+    if (!src) return 'ERR\tLogo introuvable : resélectionne-le et recommence.';
+    var name = String(layerName || 'MXN_REMPLISSAGE');
+
+    var layer = null, L;
+    for (L = 0; L < doc.layers.length; L++) if (doc.layers[L].name === name) { layer = doc.layers[L]; break; }
+    if (!layer) { layer = doc.layers.add(); layer.name = name; }
+    try { layer.locked = false; layer.visible = true; } catch (eL) {}
+
+    var ab = doc.artboards[doc.artboards.getActiveArtboardIndex()].artboardRect;
+    var originX = ab[0], originY = ab[1];
+
+    var rows = String(payload).split(';'), done = 0, firstError = '';
+    for (var r = 0; r < rows.length; r++) {
+      if (!rows[r]) continue;
+      var f = rows[r].split(',');
+      var ang = parseFloat(f[0]), tx = parseFloat(f[1]), ty = parseFloat(f[2]);
+      var copy = null, why = '';
+      try { copy = src.duplicate(layer, ElementPlacement.PLACEATEND); }
+      catch (eD) { why = String(eD); }
+      if (!copy) { if (!firstError) firstError = 'duplicate: ' + why; continue; }
+      if (ang) {
+        try { copy.rotate(-ang, true, true, true, true, Transformation.CENTER); } catch (eR) {}
+      }
+      var gb = copy.geometricBounds;
+      try {
+        copy.translate(originX + tx * MM - gb[0], originY - ty * MM - gb[1], true, true, true, true);
+        copy.name = 'MXN_FILL';
+        done++;
+      } catch (eT) { if (!firstError) firstError = 'translate: ' + String(eT); }
+    }
+    app.redraw();
+    return 'OK\t' + done + '\t' + name + '\t' + firstError;
+  } catch (e) { return 'ERR\t' + e + ' (ligne ' + e.line + ')'; }
+}
+
+function mxnsClearFill(layerName) {
+  try {
+    var doc = app.activeDocument, name = String(layerName || 'MXN_REMPLISSAGE'), n = 0;
+    for (var L = doc.layers.length - 1; L >= 0; L--) {
+      if (doc.layers[L].name !== name) continue;
+      try { doc.layers[L].locked = false; } catch (e1) {}
+      n = doc.layers[L].pageItems.length;
+      doc.layers[L].remove();
+    }
+    app.redraw();
+    return 'OK\t' + n;
+  } catch (e) { return 'ERR\t' + e; }
 }

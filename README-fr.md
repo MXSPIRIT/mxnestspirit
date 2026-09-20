@@ -7,6 +7,41 @@ Gratuite, libre, faite dans un atelier qui produit des kits depuis 2009.
 
 ---
 
+## Nouveau en 3.0
+
+**Bouton Stop.** Un calcul long s'interrompt — V10, Sparrow ou l'affinage. Le
+meilleur plan trouvé est conservé et reste applicable : arrêter la recherche ne
+veut jamais dire perdre le résultat.
+
+**Décalage, trois modes.** Nouveau tracé de coupe autour du visuel, élargir le
+tracé existant, ou élargir le masque pour un vrai fond perdu. Il lit ce qui est
+sélectionné au moment du clic, sans dépendre de l'analyse du nesting — c'est ce
+qui le faisait échouer sur les pièces venues d'un PDF.
+
+**Semer un logo dans la chute.** Tu sélectionnes un logo, il en pose autant de
+copies que la place le permet entre les pièces, y compris dans les creux
+fermés. Elles ne touchent jamais une pièce et n'allongent pas la planche. Elles
+vont sur leur propre calque : un essai raté se retire d'un clic.
+
+**Laizes enregistrées.** Tu écris une laize, tu cliques Garder, tu la retrouves
+dans un mois.
+
+**Tout remettre à zéro.** Vide le panneau et nettoie Illustrator : références
+mémorisées, session, étiquettes laissées dans les notes des calques. C'est cette
+dernière qui obligeait à redémarrer Illustrator.
+
+**Surveillance du document.** Tu changes de fichier et l'analyse périmée est
+jetée au lieu d'être appliquée au mauvais document.
+
+**Jauge de remplissage et couleurs plus lisibles.** Verte au-dessus de 70 %,
+orange en dessous.
+
+**Pièces perdues et contacts, corrigés.** Pendant l'affinage, une pièce dont
+l'empreinte ne pouvait pas être reconstruite — une pièce trop grande à précision
+fine — était sautée en silence : elle disparaissait du plan et sa place restait
+libre, donc une autre venait s'y poser. Un tour d'affinage qui ne peut pas tout
+reposer est désormais abandonné en bloc, le plan précédent reste intact.
+
 ## Nouveau en 2.0
 
 **Le fond perdu.** Il élargit le masque d'écrêtage d'une pièce de quelques

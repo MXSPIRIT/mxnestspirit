@@ -2,13 +2,18 @@
 (function () {
   'use strict';
 
-  var watchedDoc = null;
+  var watchedDoc = null, cancelled = false;
 
   var cs = new CSInterface();
   var $ = function (id) { return document.getElementById(id); };
   var parts = [], result = null, busy = false, session = '';
 
-  function log(m) { var e = $('log'); e.textContent = m + '\n' + e.textContent; }
+  function log(m) {
+    var e = $('log');
+    var lines = (m + '\n' + e.textContent).split('\n');
+    if (lines.length > 40) lines = lines.slice(0, 40);   /* sinon il enfle sans fin */
+    e.textContent = lines.join('\n');
+  }
   function hint(m, cls) { var h = $('hint'); h.textContent = m; h.className = 'hint' + (cls ? ' ' + cls : ''); }
   function T(key, vars, fr) { var s = I18N.t(key, vars); return s === null ? fr : s; }
   function esc(s) { return String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"'); }
@@ -18,6 +23,10 @@
   }
   function lock(on) {
     busy = on;
+    /* Le Stop est le SEUL bouton actif pendant un calcul, et il doit l'être
+       quel que soit le moteur. Il partait désactivé dans la page et rien ne le
+       rallumait : il était donc gris au moment précis où il sert. */
+    if ($('stop')) $('stop').disabled = !on;
     $('scan').disabled = on;
     $('diag').disabled = on;
     $('run').disabled = on || !parts.length;
@@ -26,6 +35,9 @@
     $('marks').disabled = on;
     $('msave').disabled = on;
     $('dobleed').disabled = on;
+    $('reset').disabled = on;
+    $('dofill').disabled = on;
+    $('clearfill').disabled = on;
   }
 
 
@@ -246,6 +258,8 @@
   $('run').addEventListener('click', function () {
     if (!parts.length || busy) return;
     lock(true);
+    cancelled = false;
+    $('stop').disabled = false;
     var opt = options();
     var tries = parseInt($('effort').value, 10) || 12;
     // plus on se donne d'essais, plus on fouille finement à chaque essai
@@ -258,6 +272,7 @@
     function runSequential(list, done) {
       var orders = MXNest.orderings(list, tries), i = 0, b = null;
       (function step() {
+        if (cancelled) { log('Recherche interrompue à l\'essai ' + i + '/' + orders.length + '.'); done(b); return; }
         if (i >= orders.length) { done(b); return; }
         hint(T('msg.search', { i: i + 1, n: orders.length }, 'Recherche ' + (i + 1) + '/' + orders.length + '…'));
         var r = null;
@@ -314,7 +329,7 @@
       if (!total || !best || best.placements.length < 4) { done(); return; }
       var doneRounds = 0;
       (function step() {
-        if (doneRounds >= total) { done(); return; }
+        if (cancelled || doneRounds >= total) { done(); return; }
         hint(T('msg.refining', { i: doneRounds, n: total }, 'Affinage ' + doneRounds + '/' + total + '…'));
         try {
           /* graine tirée au hasard à chaque paquet : l'affinage ne paie qu'une
@@ -348,6 +363,7 @@
           (pairsMade ? ' · ' + pairsMade + ' couple(s) retenus' : '') +
           (bad === 0 ? ' · aucun contact' : bad > 0 ? ' · ' + bad + ' CONTACT' : ''));
       var nf = best.failed ? best.failed.length : 0;
+      $('stop').disabled = true;
       hint(nf > 0 ? T('msg.unplaced', { n: nf }, nf + ' pièce(s) non placée(s) : planche trop courte ou pièce plus large que la laize.')
          : bad > 0 ? T('msg.contact', { n: bad }, bad + ' pièce(s) en contact — écart lame trop faible.')
          : T('msg.done', { s: s }, 'Terminé en ' + s + ' s.'),
@@ -360,11 +376,19 @@
     $('wid').textContent = (parseFloat($('sheet').value) || 1350) + ' mm';
     if (!r) {
       $('len').textContent = '—'; $('fill').textContent = '—'; $('waste').textContent = '—';
+      var g0 = $('gauge');
+      if (g0) { g0.className = 'gauge'; g0.firstChild.style.width = '0'; }
       $('result').className = 'result';
       return;
     }
     $('len').textContent = (r.length / 1000).toFixed(3).replace('.', ',');
-    $('fill').textContent = (r.fill * 100).toFixed(1).replace('.', ',') + ' %';
+    var pct = r.fill * 100;
+    $('fill').textContent = pct.toFixed(1).replace('.', ',') + ' %';
+    var g = $('gauge');
+    if (g) {
+      g.className = 'gauge ' + (pct >= 70 ? 'good' : 'mid');
+      g.firstChild.style.width = Math.max(2, Math.min(100, pct)) + '%';
+    }
     var surf = r.length * r.sheetWidth / 1e6;
     if (!r.sheetWidth) surf = r.length * (parseFloat($('sheet').value) || 1350) / 1e6;
     $('waste').textContent = (surf - r.partArea / 1e6).toFixed(2).replace('.', ',') + ' m²';
@@ -372,7 +396,10 @@
   }
 
   // ---------- aperçu ----------
-  var PAL = ['#ff5a1f', '#4aa3df', '#6ec07a', '#e8c14a', '#b07ad4', '#4fc3bd'];
+  /* Dix teintes au lieu de six, réparties sur le cercle : sur une planche de
+     quarante pièces, deux voisines de même couleur se confondaient. */
+  var PAL = ['#ff5a1f', '#4aa3df', '#57c98a', '#f0b429', '#a97bd6', '#4fc3bd',
+             '#e8615f', '#7aa63c', '#5d7fc9', '#d98cc0'];
 
   function draw(r) {
     var cv = $('preview'), ctx = cv.getContext('2d');
@@ -570,53 +597,268 @@
   $('dobleed').addEventListener('click', function () {
     if (busy) return;
     var mm = parseFloat($('bleed').value) || 0;
-    if (mm <= 0) { hint(T('msg.bleed0', null, 'Mets une valeur de fond perdu supérieure à 0.'), 'warn'); return; }
-    if (!parts.length) { hint(T('msg.bleedscan', null, 'Analyse d\'abord le document.'), 'warn'); return; }
+    if (mm <= 0) { hint(T('msg.bleed0', null, 'Mets une valeur de décalage supérieure à 0.'), 'warn'); return; }
     if (typeof ClipperLib === 'undefined') { hint('Clipper absent du panneau.', 'err'); return; }
+    var mode = $('bleedmode').value;
 
     lock(true);
-    var S = 10000, rows = [], skipped = 0;
-    for (var i = 0; i < parts.length; i++) {
-      var p = parts[i];
-      var src = p.rings && p.rings.length ? p.rings[0] : null;
-      if (!src || src.length < 3) { skipped++; continue; }
-      var path = [];
-      for (var q = 0; q < src.length; q++) {
-        path.push({ X: Math.round(src[q][0] * S), Y: Math.round(src[q][1] * S) });
-      }
-      var co = new ClipperLib.ClipperOffset(2, 0.25 * S);
-      co.AddPath(path, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
-      var sol = new ClipperLib.Paths();
-      co.Execute(sol, mm * S);
-      if (!sol.length) { skipped++; continue; }
-      var best = 0, bestA = -1;
-      for (var k = 0; k < sol.length; k++) {
-        var a = Math.abs(ClipperLib.Clipper.Area(sol[k]));
-        if (a > bestA) { bestA = a; best = k; }
-      }
-      var out = sol[best], buf = [];
-      for (var z = 0; z < out.length; z++) {
-        buf.push((out[z].X / S).toFixed(2) + ',' + (out[z].Y / S).toFixed(2));
-      }
-      rows.push(p.id + '|' + buf.join(' '));
-    }
-    if (!rows.length) { hint(T('msg.bleednone', null, 'Aucune pièce exploitable pour le fond perdu.'), 'warn'); lock(false); return; }
+    hint(T('msg.bleedscanning', null, 'Lecture des contours sélectionnés…'));
 
-    call('mxnsBleed', [rows.join(';'), session], function (txt) {
+    /* Chemin direct : on lit ce qui est sélectionné MAINTENANT, on décale, on
+       applique dans le même ordre. Aucun identifiant, aucune étiquette, aucune
+       dépendance à l'analyse du nesting — c'est là que ça cassait sur les
+       pièces venues d'un PDF. */
+    call('mxnsGetCuts', [$('cutnames').value, '0.08'], function (txt) {
+      var lines = txt.split('\n');
+      if (lines[0].indexOf('ERR') === 0) { hint(lines[0].split('\t')[1], 'err'); lock(false); return; }
+
+      var items = [], cur = null, surSel = false, stats = null;
+      for (var i = 1; i < lines.length; i++) {
+        var f = lines[i].split('\t');
+        if (f[0] === 'SEL') surSel = (f[1] === '1');
+        else if (f[0] === 'P') { cur = { idx: parseInt(f[1], 10), rings: [] }; items.push(cur); }
+        else if (f[0] === 'R' && cur) {
+          var pts = f[1].split(' '), ring = [];
+          for (var k = 0; k < pts.length; k++) {
+            var xy = pts[k].split(',');
+            ring.push([parseFloat(xy[0]), parseFloat(xy[1])]);
+          }
+          if (ring.length > 2) cur.rings.push(ring);
+        } else if (f[0] === 'END') stats = f;
+      }
+
+      var S = 10000, rows = [], traitees = 0, sansContour = 0;
+      for (var p2 = 0; p2 < items.length; p2++) {
+        var it = items[p2];
+        if (!it.rings.length) { sansContour++; continue; }
+        var co = new ClipperLib.ClipperOffset(2, 0.25 * S);
+        for (var r2 = 0; r2 < it.rings.length; r2++) {
+          var src = it.rings[r2], path = [];
+          for (var q2 = 0; q2 < src.length; q2++) {
+            path.push({ X: Math.round(src[q2][0] * S), Y: Math.round(src[q2][1] * S) });
+          }
+          co.AddPath(path, ClipperLib.JoinType.jtRound, ClipperLib.EndType.etClosedPolygon);
+        }
+        var sol = new ClipperLib.Paths();
+        co.Execute(sol, mm * S);
+        if (!sol.length) { sansContour++; continue; }
+
+        var cl = new ClipperLib.Clipper();
+        cl.AddPaths(sol, ClipperLib.PolyType.ptSubject, true);
+        var out = new ClipperLib.Paths();
+        cl.Execute(ClipperLib.ClipType.ctUnion, out,
+                   ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+        if (!out.length) out = sol;
+
+        /* on ne garde que le contour extérieur : c'est lui le masque */
+        var best = 0, bestA = -1;
+        for (var o2 = 0; o2 < out.length; o2++) {
+          var a = Math.abs(ClipperLib.Clipper.Area(out[o2]));
+          if (a > bestA) { bestA = a; best = o2; }
+        }
+        var buf = [];
+        for (var z2 = 0; z2 < out[best].length; z2++) {
+          buf.push((out[best][z2].X / S).toFixed(2) + ',' + (out[best][z2].Y / S).toFixed(2));
+        }
+        rows.push(it.idx + '|' + buf.join(' '));
+        traitees++;
+      }
+
+      if (!rows.length) {
+        hint(T('msg.bleednone', null,
+               'Aucun contour exploitable' + (surSel ? ' dans la sélection.' : ' dans le document.')), 'warn');
+        log('Décalage : rien à traiter' + (stats ? ' (' + stats[1] + ' objets examinés)' : '') + '.');
+        lock(false);
+        return;
+      }
+
+      call('mxnsApplyOffset', [rows.join(';'), (mode === 'mask' ? 'mask' : 'cut'), $('cutnames').value],
+        function (t2) {
+          var g = t2.split('\t');
+          if (g[0] !== 'OK') { hint(g[1] || t2, 'err'); lock(false); return; }
+          var crees = parseInt(g[1] || '0', 10), remplaces = parseInt(g[2] || '0', 10), rates = parseInt(g[3] || '0', 10);
+          var msg = (mode === 'mask')
+            ? (crees + remplaces) + ' masque(s) à +' + mm + ' mm' + (crees ? ' (' + crees + ' créé(s))' : '')
+            : crees + ' tracé(s) de coupe à +' + mm + ' mm';
+          msg += (g[4] === '1') ? ' (sélection).' : ' (tout le document).';
+          if (rates) msg += ' ' + rates + ' échec(s).';
+          if (sansContour) msg += ' ' + sansContour + ' sans contour.';
+          hint(msg, (rates || sansContour) ? 'warn' : null);
+          log('Décalage : ' + msg);
+          parts = [];
+          result = null;
+          session = '';
+          setResult(null);
+          draw(null);
+          lock(false);
+        });
+    });
+  });
+
+  /* Remise à zéro complète : le panneau ET Illustrator. Les références
+     d'objets et les étiquettes posées dans les notes survivaient à tout, si
+     bien que la seule issue était de redémarrer Illustrator. */
+  $('reset').addEventListener('click', function () {
+    lock(true);
+    call('mxnsReset', [], function (txt) {
+      var f = txt.split('\t');
+      parts = [];
+      result = null;
+      session = '';
+      watchedDoc = null;
+      setResult(null);
+      draw(null);
+      $('log').textContent = '';
+      hint(T('msg.reset', { n: f[1] || 0 },
+             'Tout est remis à zéro' + (f[0] === 'OK' ? ' — ' + (f[1] || 0) + ' étiquette(s) retirée(s) du document.' : '.')));
+      lock(false);
+      call('mxnsPing', [], function (t2) {
+        var g = t2.split('\t');
+        if (g[0] === 'OK') {
+          watchedDoc = g[3] || '';
+          $('hostinfo').textContent = g[1] + ' ' + String(g[2]).split(' ')[0] + ' · ' + g[3];
+        }
+      });
+    });
+  });
+
+  /* ---------- semer un logo dans la chute ----------
+     Le plan est calculé, il reste du vide entre les pièces. On y sème autant
+     de copies d'un motif que la place le permet — sans toucher aux pièces, et
+     sans allonger la planche d'un millimètre. Les copies vont sur leur propre
+     calque, pour qu'un coup d'essai se retire d'un bloc. */
+  $('dofill').addEventListener('click', function () {
+    if (busy) return;
+    if (!result || !result.placements.length) {
+      hint(T('msg.fillnoplan', null, 'Calcule d\'abord une planche.'), 'warn');
+      return;
+    }
+    var maxN = parseInt($('fillmax').value, 10) || 40;
+    lock(true);
+    hint(T('msg.fillreading', null, 'Lecture du logo sélectionné…'));
+
+    call('mxnsGetLogo', ['0.08'], function (txt) {
+      var lines = txt.split('\n');
+      if (lines[0].indexOf('ERR') === 0) { hint(lines[0].split('\t')[1], 'err'); lock(false); return; }
+      var rings = [], nom = 'logo';
+      for (var i = 1; i < lines.length; i++) {
+        var f = lines[i].split('\t');
+        if (f[0] === 'NAME') nom = f[1];
+        else if (f[0] === 'R') {
+          var pts = f[1].split(' '), ring = [];
+          for (var k = 0; k < pts.length; k++) {
+            var xy = pts[k].split(',');
+            ring.push([parseFloat(xy[0]), parseFloat(xy[1])]);
+          }
+          if (ring.length > 2) rings.push(ring);
+        }
+      }
+      if (!rings.length) { hint(T('msg.filllogo', null, 'Logo illisible.'), 'err'); lock(false); return; }
+
+      var logo = { id: 'LOGO', rings: rings };
+      var spots;
+      try { spots = MXNest.fillFree(result, logo, options(), maxN); }
+      catch (e) { hint('Calcul du remplissage impossible : ' + e.message, 'err'); lock(false); return; }
+      if (!spots.length) {
+        hint(T('msg.fillzero', null, 'Aucune place pour ce logo dans la chute — essaie plus petit.'), 'warn');
+        lock(false);
+        return;
+      }
+
+      var rows = [];
+      for (var p2 = 0; p2 < spots.length; p2++) {
+        rows.push(spots[p2].angle + ',' + spots[p2].x.toFixed(2) + ',' + spots[p2].y.toFixed(2));
+      }
+      call('mxnsPlaceLogos', [rows.join(';'), 'MXN_REMPLISSAGE'], function (t2) {
+        var g = t2.split('\t');
+        if (g[0] !== 'OK') { hint(g[1] || t2, 'err'); lock(false); return; }
+        var poses = parseInt(g[1] || '0', 10);
+        if (!poses) {
+          hint('Aucune copie posée' + (g[3] ? ' — ' + g[3] : '') + '. Resélectionne le logo et réessaie.', 'err');
+          log('Remplissage : 0 copie. ' + (g[3] || 'raison inconnue') + '. Emplacements calculés : ' + spots.length + '.');
+          lock(false);
+          return;
+        }
+        hint(T('msg.fillok', { n: poses, nom: nom },
+               poses + ' copie(s) de « ' + nom + ' » semées dans la chute, sur le calque ' + g[2] + '.') +
+             (poses < spots.length ? ' (' + (spots.length - poses) + ' non posée(s))' : ''));
+        log('Remplissage : ' + poses + '/' + spots.length + ' copies de ' + nom +
+            (g[3] ? ' — ' + g[3] : '') + '.');
+        lock(false);
+      });
+    });
+  });
+
+  $('clearfill').addEventListener('click', function () {
+    if (busy) return;
+    lock(true);
+    call('mxnsClearFill', ['MXN_REMPLISSAGE'], function (txt) {
       var f = txt.split('\t');
       if (f[0] !== 'OK') hint(f[1] || txt, 'err');
-      else {
-        var surSel = f[4] === '1';
-        var msg = f[1] + ' pièce(s) élargies de ' + mm + ' mm' +
-                  (surSel ? ' (sélection)' : ' (tout le document)') +
-                  (f[2] > 0 ? ' — ' + f[2] + ' sans masque, inchangée(s).' : '.');
-        hint(msg, f[2] > 0 ? 'warn' : null);
-        log('Fond perdu : ' + f[1] + ' masque(s) de ' + mm + ' mm' +
-            (surSel ? ', sur la sélection' : ', document entier') +
-            ', ' + f[2] + ' sans masque, ' + (f[3] || 0) + ' hors sélection.');
-      }
+      else hint(T('msg.fillcleared', { n: f[1] }, (f[1] || 0) + ' logo(s) retiré(s).'));
       lock(false);
     });
+  });
+
+  /* ---------- laizes mémorisées ----------
+     Un atelier tourne sur trois ou quatre laizes, pas sur une. Elles sont
+     gardées dans le panneau, pas dans le document : elles suivent la machine,
+     pas le fichier. */
+  function loadWidths() {
+    var list = [];
+    try {
+      var raw = window.localStorage.getItem('mxns_widths');
+      if (raw) list = JSON.parse(raw);
+    } catch (e) { list = []; }
+    if (!list.length) list = [1350];
+    var sel = $('sheetlist');
+    sel.innerHTML = '';
+    var o0 = document.createElement('option');
+    o0.value = ''; o0.textContent = '—';
+    sel.appendChild(o0);
+    for (var i = 0; i < list.length; i++) {
+      var o = document.createElement('option');
+      o.value = String(list[i]); o.textContent = String(list[i]);
+      sel.appendChild(o);
+    }
+    return list;
+  }
+  function saveWidths(list) {
+    try { window.localStorage.setItem('mxns_widths', JSON.stringify(list)); } catch (e) { }
+    loadWidths();
+  }
+  loadWidths();
+  $('sheetlist').addEventListener('change', function () {
+    if (!this.value) return;
+    $('sheet').value = this.value;
+    draw(result);
+  });
+  $('sheetsave').addEventListener('click', function () {
+    var v = Math.round(parseFloat($('sheet').value) || 0);
+    if (v < 50) { hint(T('msg.widthbad', null, 'Laize invalide.'), 'warn'); return; }
+    var list = loadWidths();
+    if (list.indexOf(v) < 0) { list.push(v); list.sort(function (a, b) { return a - b; }); saveWidths(list); }
+    hint(T('msg.widthsaved', { n: v }, 'Laize ' + v + ' mm enregistrée.'));
+  });
+  $('sheetdel').addEventListener('click', function () {
+    var v = Math.round(parseFloat($('sheet').value) || 0);
+    var list = loadWidths(), i = list.indexOf(v);
+    if (i < 0) { hint(T('msg.widthnone', null, 'Cette laize n\'est pas dans la liste.'), 'warn'); return; }
+    list.splice(i, 1);
+    saveWidths(list);
+    hint(T('msg.widthdel', { n: v }, 'Laize ' + v + ' mm oubliée.'));
+  });
+
+  /* ---------- stop ----------
+     Une recherche maximale dure une minute et demie. Sans bouton d'arrêt, la
+     seule issue était d'attendre. Le plan déjà trouvé est conservé : on arrête
+     la recherche, on ne jette pas le résultat. */
+  $('stop').addEventListener('click', function () {
+    if (!busy) return;
+    cancelled = true;
+    $('stop').disabled = true;
+    hint(T('msg.stopping', null, 'Arrêt demandé — on garde le meilleur plan trouvé.'), 'warn');
+    log('Arrêt demandé.');
   });
 
   window.addEventListener('resize', function () { draw(result); });
@@ -632,6 +874,12 @@
   // Le nesting historique reste inchangé : le bouton hybride injecte simplement
   // un autre candidat dans le même résultat que le bouton Appliquer consomme.
   window.MXNestSpirit = {
+    /* Le pont Sparrow tourne dans son propre fichier : il ne voit pas la
+       variable d'arrêt du panneau, il doit la DEMANDER. Cette fonction
+       manquait — d'où un Stop qui marchait sur V10, qui lit la variable en
+       direct, et restait sans effet sur Sparrow. */
+    isCancelled: function () { return cancelled; },
+    resetCancel: function () { cancelled = false; },
     getParts: function () { return parts; },
     getResult: function () { return result; },
     getOptions: function () { return options(); },

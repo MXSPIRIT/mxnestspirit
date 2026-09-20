@@ -7,6 +7,39 @@ Free, open source, written in a workshop that has been producing kits since 2009
 
 ---
 
+## What's new in 3.0
+
+**Stop button.** Long searches can now be interrupted — V10, Sparrow, or the
+refinement pass. The best plan found so far is kept and stays applicable, so
+stopping the search never means losing the result.
+
+**Offset tool, three modes.** New cut contour around the artwork, grow the
+existing contour, or grow the clipping mask for a true bleed. It reads what is
+selected at the moment you click — no dependency on the nesting analysis, which
+is what used to make it fail on parts coming from a PDF.
+
+**Scatter a logo in the offcut.** Select a logo, and as many copies as fit are
+dropped into the gaps between parts — including closed pockets. They never
+touch a part and never lengthen the sheet. They land on their own layer, so a
+trial run is removed in one click.
+
+**Saved roll widths.** Type a width, click Save, and it is there next month.
+
+**Reset everything.** Clears the panel and cleans Illustrator — stored
+references, session, and the tags left in layer notes. That last one is why a
+restart of Illustrator used to be the only way out.
+
+**Document watch.** Switch files and the stale analysis is dropped instead of
+being applied to the wrong document.
+
+**Fill gauge and clearer colours.** Green above 70 % fill, orange below.
+
+**Missing parts and contacts, fixed.** During the refinement pass, a part whose
+footprint could not be rebuilt — an oversized part at fine precision — was
+silently skipped: it vanished from the plan and its place was left free, so
+another part landed on top. A refinement round that cannot re-place everything
+is now abandoned whole, leaving the previous plan untouched.
+
 ## What's new in 2.0
 
 **Bleed.** Enlarges a part's clipping mask by a few millimetres so the artwork

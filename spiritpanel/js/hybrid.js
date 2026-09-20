@@ -255,6 +255,13 @@
     var total = rungs.length;
 
     function attempt(ridx) {
+      /* Arrêt demandé : on ne lance pas l'essai suivant. Ce qui a déjà été
+         trouvé est conservé — arrêter la recherche n'est pas jeter le plan. */
+      if (window.MXNestSpirit && window.MXNestSpirit.isCancelled && window.MXNestSpirit.isCancelled()) {
+        if (bestSr) { done(bestSr); return; }
+        fail(new Error('SPARROW_CANCELLED'));
+        return;
+      }
       if (ridx >= total) {
         if (bestSr) { done(bestSr); return; }
         fail(lastErr || new Error('SPARROW_NO_VALID_SOLUTION'));
@@ -283,6 +290,15 @@
         seed: Math.floor((Date.now() + ridx * 7919) % 2147483647),
         onLog: function (txt) {
           if (!window.MXNestSpirit) return;
+          /* tout ce qui concerne l'arrêt part dans le journal, où ça reste
+             lisible et copiable */
+          if (String(txt).indexOf('[STOP]') >= 0) {
+            var ls = String(txt).split(/[\r\n]+/);
+            for (var si = 0; si < ls.length; si++) {
+              if (ls[si].indexOf('[STOP]') >= 0) window.MXNestSpirit.log(ls[si]);
+            }
+            return;
+          }
           /* Sparrow n'écrit son JSON qu'à la toute fin : impossible de dessiner
              la planche en cours de route. En revanche il annonce chaque
              amélioration dans son journal — « feasible solution found! (width:
@@ -350,8 +366,11 @@
     var opt = makeOptions();
     var tries = parseInt($id('effort').value, 10) || 16;
     var t0 = Date.now();
+    /* Un arrêt demandé au calcul précédent ne doit pas tuer celui-ci dans la
+       seconde : on remet le drapeau à zéro au démarrage. */
+    if (window.MXNestSpirit.resetCancel) window.MXNestSpirit.resetCancel();
     window.MXNestSpirit.setBusy(true);
-    window.MXNestSpirit.hint('Hybrid : V10 + Sparrow…');
+    window.MXNestSpirit.hint('Hybrid : V10 + Sparrow… (Stop pour interrompre)');
 
     /* V10 n'est plus le moteur principal du bouton hybride : Sparrow cherche
      * mieux globalement. V10 reste le filet de sécurité — si Sparrow ne démarre
@@ -368,6 +387,20 @@
       }
       window.MXNestSpirit.hint('Hybrid : V10 terminé. Lancement de Sparrow…');
 
+      if (window.MXNestSpirit && window.MXNestSpirit.isCancelled && window.MXNestSpirit.isCancelled()) {
+        /* Arrêt demandé pendant la phase V10 : on ne lance pas Sparrow du tout,
+           et on garde le plan V10 obtenu jusque-là. */
+        if (v10) {
+          v10.hybridSource = 'V10 (arrêté)';
+          window.MXNestSpirit.setExternalResult(v10);
+          window.MXNestSpirit.hint('Arrêté — plan V10 conservé : ' + (v10.length / 1000).toFixed(3) + ' m.');
+        } else {
+          window.MXNestSpirit.hint('Arrêté avant d\'avoir un plan.', 'warn');
+        }
+        window.MXNestSpirit.log('HYBRID : arrêt demandé, Sparrow non lancé.');
+        window.MXNestSpirit.setBusy(false);
+        return;
+      }
       runSparrow(parts, opt, function (sr) {
         /* Le plan de Sparrow, converti tel quel : c'est LUI le candidat, et sa
          * longueur réelle est celle-ci — mesurée sur les contours d'origine,
@@ -426,6 +459,13 @@
           window.MXNestSpirit.setExternalResult(v10);
         }
         var em = err && err.message ? err.message : String(err);
+        if (em === 'SOLVER_CANCELLED' || em === 'SPARROW_CANCELLED') {
+          window.MXNestSpirit.log('HYBRID : Sparrow arrêté à la demande.');
+          window.MXNestSpirit.hint(v10 ? ('Arrêté — plan V10 conservé : ' + (v10.length / 1000).toFixed(3) + ' m.')
+                                       : 'Arrêté avant d\'avoir un plan.', v10 ? null : 'warn');
+          window.MXNestSpirit.setBusy(false);
+          return;
+        }
         var ed = err && err.detail ? (' · ' + err.detail) : '';
         window.MXNestSpirit.log('HYBRID : Sparrow erreur — ' + em + ed);
         window.MXNestSpirit.hint(v10 ? ('Sparrow : ' + em + ed) : ('Hybrid : ' + em + ed), 'warn');
