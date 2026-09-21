@@ -7,6 +7,24 @@ Free, open source, written in a workshop that has been producing kits since 2009
 
 ---
 
+## What's new in 4.2
+
+**Ink manager, modelled on Esko's Ink Manager.** Lists every ink actually used
+in the document — the process inks (cyan, magenta, yellow, black) and every
+spot colour, including those hidden in gradients and text. Unused swatches show
+greyed out. Each spot colour has a "becomes" column — another spot colour or
+CMYK — and **Apply all** runs every conversion in one click, tint preserved.
+Tick inks to select their objects or rename them.
+
+**Sparrow time.** A field sets how long the solver may search. Sparrow always
+returns the best plan found at the moment it is stopped, so less time never
+breaks anything — the sheet is just a little less tight.
+
+**Live sheet length.** While Sparrow searches, the panel shows the best length
+reached so far.
+
+**Collapsible blocks.** Finishing and Inks fold away and remember their state.
+
 ## What's new in 3.0
 
 **Stop button.** Long searches can now be interrupted — V10, Sparrow, or the

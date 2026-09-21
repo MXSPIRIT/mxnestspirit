@@ -7,6 +7,25 @@ Gratuite, libre, faite dans un atelier qui produit des kits depuis 2009.
 
 ---
 
+## Nouveau en 4.2
+
+**Gestionnaire d'encres, sur le modèle de l'Ink Manager d'Esko.** Il liste
+toutes les encres réellement utilisées — les quadri (cyan, magenta, jaune, noir)
+et chaque ton direct, y compris ceux cachés dans les dégradés et les textes. Les
+tons inutilisés du nuancier apparaissent en grisé. Chaque ton direct a sa
+colonne « devient » — un autre ton direct ou la quadri — et **Tout appliquer**
+lance toutes les conversions d'un seul clic, teinte conservée. Cocher des
+encres permet de sélectionner leurs objets ou de les renommer.
+
+**Temps Sparrow.** Un champ fixe combien de temps le solveur cherche. Sparrow
+rend toujours le meilleur plan trouvé au moment où on l'arrête : moins de temps
+ne casse rien, la planche est juste un peu moins serrée.
+
+**Métrage en direct.** Pendant que Sparrow cherche, le panneau affiche le
+meilleur métrage atteint.
+
+**Blocs repliables.** Finitions et Encres se replient et retiennent leur état.
+
 ## Nouveau en 3.0
 
 **Bouton Stop.** Un calcul long s'interrompt — V10, Sparrow ou l'affinage. Le
