@@ -52,7 +52,7 @@ var CUTTAG = 'MXNCUT:';
   function flatten(path, tol) {
     var pts = path.pathPoints, n = pts.length, out = [];
     if (n < 2) return out;
-    var last = path.closed ? n : n - 1;
+    var last = (path.closed || isClosedish(path)) ? n : n - 1;
     var budget = Math.floor(6000 / n);
     if (budget > 48) budget = 48;
     if (budget < 1) budget = 1;
@@ -85,8 +85,63 @@ var CUTTAG = 'MXNCUT:';
     return out;
   }
 
+  /* --- objets éteints (œil coupé), verrouillés, repères : on n'y touche jamais --- */
+  function isOff(item) {
+    try { if (item.hidden) return true; } catch (e) { }
+    try { if (item.typename === 'PathItem' && item.guides) return true; } catch (e2) { }
+    return false;
+  }
+
+  // l'objet et TOUS ses parents (groupes, calques, sous-calques) sont allumés et déverrouillés
+  function isLive(item) {
+    var p = item, guard = 0;
+    while (p && guard++ < 40) {
+      var tn = '';
+      try { tn = p.typename; } catch (e) { return false; }
+      if (tn === 'Document') return true;
+      if (tn === 'Layer') {
+        try { if (!p.visible || p.locked) return false; } catch (e2) { return false; }
+      } else {
+        if (isOff(p)) return false;
+        try { if (p.locked) return false; } catch (e3) { }
+      }
+      try { p = p.parent; } catch (e4) { return true; }
+    }
+    return true;
+  }
+
+  // tracé rectangulaire (4 points en angle droit, côtés parallèles aux axes) : cadre de recadrage
+  function isRectPath(p) {
+    try {
+      if (p.typename !== 'PathItem' || !p.closed) return false;
+      var pts = p.pathPoints;
+      if (pts.length !== 4) return false;
+      for (var i = 0; i < 4; i++) {
+        var a = pts[i].anchor, b = pts[(i + 1) % 4].anchor;
+        var l = pts[i].leftDirection, r = pts[i].rightDirection;
+        if (Math.abs(l[0] - a[0]) + Math.abs(l[1] - a[1]) + Math.abs(r[0] - a[0]) + Math.abs(r[1] - a[1]) > 0.01) return false;
+        if (Math.abs(a[0] - b[0]) > 0.01 && Math.abs(a[1] - b[1]) > 0.01) return false;
+      }
+      return true;
+    } catch (e) { return false; }
+  }
+
+  /* Fermé « en pratique » : les PDF de découpe livrent souvent des contours
+     dont le drapeau closed est faux alors que le dernier point retombe sur le
+     premier. Pris pour des traits ouverts, ils finissaient en rectangles. */
+  function isClosedish(p) {
+    try {
+      if (p.closed) return true;
+      var pts = p.pathPoints, n = pts.length;
+      if (n < 3) return false;
+      var a = pts[0].anchor, b = pts[n - 1].anchor;
+      return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) < 2;        // < 0,7 mm
+    } catch (e) { return false; }
+  }
+
   function collect(item, bag) {
     var tn = item.typename, i;
+    if (isOff(item)) return bag;
     if (tn === 'PathItem') { bag.push(item); return bag; }
     if (tn === 'CompoundPathItem') {
       for (i = 0; i < item.pathItems.length; i++) bag.push(item.pathItems[i]);
@@ -98,16 +153,45 @@ var CUTTAG = 'MXNCUT:';
     return bag;
   }
 
+  // textes vivants, images, symboles, objets inconnus : ils occupent leur boîte
+  function boxItems(item, bag) {
+    var tn = item.typename, i;
+    if (isOff(item)) return bag;
+    if (tn === 'GroupItem') {
+      for (i = 0; i < item.pageItems.length; i++) boxItems(item.pageItems[i], bag);
+      return bag;
+    }
+    if (tn === 'TextFrame' || tn === 'PlacedItem' || tn === 'RasterItem' || tn === 'SymbolItem' ||
+        tn === 'MeshItem' || tn === 'PluginItem' || tn === 'GraphItem' || tn === 'LegacyTextItem') bag.push(item);
+    return bag;
+  }
+
   /* --- parcours de l'arborescence --- */
   function kidsOf(container) {
     var out = [], i, it;
     if (container.typename === 'GroupItem') {
-      for (i = 0; i < container.pageItems.length; i++) out.push(container.pageItems[i]);
+      for (i = 0; i < container.pageItems.length; i++) {
+        it = container.pageItems[i];
+        if (!isOff(it)) out.push(it);               // un objet éteint n'existe pas pour le nesting
+      }
       return out;
     }
     for (i = 0; i < container.pageItems.length; i++) {   // calque : pageItems descend, on filtre
       it = container.pageItems[i];
-      if (it.parent && it.parent.typename === 'Layer') out.push(it);
+      if (it.parent && it.parent.typename === 'Layer' && !isOff(it)) out.push(it);
+    }
+    return out;
+  }
+
+  /* Premier niveau de TOUS les calques et sous-calques, une seule fois chacun,
+     en sautant ce qui est éteint ou verrouillé (objet, calque ou sous-calque parent). */
+  function liveRoots(doc) {
+    var out = [], all = doc.pageItems, i, it;
+    for (i = 0; i < all.length; i++) {
+      it = all[i];
+      try { if (!it.parent || it.parent.typename !== 'Layer') continue; } catch (e) { continue; }
+      if (!isLive(it)) continue;
+      out.push(it);
     }
     return out;
   }
@@ -134,12 +218,29 @@ var CUTTAG = 'MXNCUT:';
   }
 
   /* descend jusqu'au groupe qui ne contient qu'un seul contour : c'est une pièce */
+  /* Un groupe dont les contours sont tous posés à même le groupe (aucun sous-groupe
+     ne porte de coupe) est UNE pièce : un mot en lettrage, une pièce percée de trous
+     de vis, un gabarit laser. Avant, chaque lettre partait toute seule. */
+  function isFlatCutGroup(g, M) {
+    if (g.typename !== 'GroupItem') return false;
+    var kids = kidsOf(g), bare = 0;
+    for (var i = 0; i < kids.length; i++) {
+      var tn = kids[i].typename;
+      if (tn === 'GroupItem') { if (countCuts(kids[i], M) > 0) return false; }
+      else if ((tn === 'PathItem' || tn === 'CompoundPathItem') && isCut(kids[i], M)) bare++;
+    }
+    return bare > 1;
+  }
+
   function findPieces(kids, M, out, stat, depth) {
     for (var i = 0; i < kids.length; i++) {
       var it = kids[i];
       try { if (it.locked || it.hidden) continue; } catch (e) { }
       var n = countCuts(it, M);
+      var wrapper = (depth === 0 && kids.length === 1);   // PDF importé : un seul groupe qui contient tout le kit
       if (n === 1) out.push(it);
+      else if (n > 1 && !wrapper && isFlatCutGroup(it, M)) out.push(it);
+      else if (n > 1 && it.typename === 'GroupItem' && M.keepGroups && !wrapper) out.push(it);
       else if (n > 1 && it.typename === 'GroupItem' && depth < 16) findPieces(kidsOf(it), M, out, stat, depth + 1);
       else if (n > 1) out.push(it);
       else stat.orphans++;
@@ -161,6 +262,7 @@ var CUTTAG = 'MXNCUT:';
     bare.sort(function (a, b) { return boundsArea(a.it) - boundsArea(b.it); });
 
     for (i = 0; i < bare.length; i++) bare[i].it.note = 'MXNCUT';
+    var TAKEN = {};
 
     for (i = 0; i < bare.length; i++) {
       var cut = bare[i].it, parent = cut.parent;
@@ -168,9 +270,7 @@ var CUTTAG = 'MXNCUT:';
       if (parent.typename === 'GroupItem' && parent.name === 'MXNEST_PIECE') continue;  // déjà regroupé
       if (parent.typename === 'GroupItem') { try { if (parent.clipped) continue; } catch (e) { } }
       var cb = cut.geometricBounds, sibs = kidsOf(parent), taken = 0;
-      var g;
-      try { g = parent.groupItems.add(); } catch (e2) { continue; }
-      g.name = 'MXNEST_PIECE';
+      var members = [cut];                       // aucun groupe créé : les objets restent où ils sont
       for (var k = sibs.length - 1; k >= 0; k--) {
         var s = sibs[k];
         if (String(s.note || '') === 'MXNCUT') continue;
@@ -178,12 +278,12 @@ var CUTTAG = 'MXNCUT:';
         var sb;
         try { sb = s.geometricBounds; } catch (e3) { continue; }
         if (sb[0] >= cb[0] - 0.5 && sb[2] <= cb[2] + 0.5 && sb[1] <= cb[1] + 0.5 && sb[3] >= cb[3] - 0.5) {
-          try { s.move(g, ElementPlacement.PLACEATEND); taken++; } catch (e4) { }
+          var key = s.typename + ':' + sb.join(',');
+          if (!TAKEN[key]) { members.push(s); TAKEN[key] = 1; taken++; }
         }
       }
-      try { cut.move(g, ElementPlacement.PLACEATBEGINNING); } catch (e5) { }
       cut.note = '';
-      pieces[bare[i].idx] = g;
+      pieces[bare[i].idx] = { typename: 'MXNSET', members: members, name: cut.name || 'pièce', item: cut };
       stat.grouped++;
       stat.orphans -= taken;
       if (stat.orphans < 0) stat.orphans = 0;
@@ -243,7 +343,7 @@ var CUTTAG = 'MXNCUT:';
     var bag = collect(item, []), best = null, bestA = -1;
     for (var i = 0; i < bag.length; i++) {
       try {
-        if (!bag[i].closed) continue;
+        if (!isClosedish(bag[i])) continue;
         if (skipRect && isRectPath(bag[i])) continue;      // on ignore les rectangles de recadrage
         if (String(bag[i].note || '') === 'MXNCLIP') continue;
         if (bag[i].parent && String(bag[i].parent.note || '') === 'MXNCLIP') continue;
@@ -256,7 +356,7 @@ var CUTTAG = 'MXNCUT:';
 
   // bornes de tout ce qui est visible dans la pièce (le masque écrête, donc il borne aussi)
   function visibleBounds(item, clip) {
-    var bag = collect(item, []), out = null, i;
+    var bag = boxItems(item, collect(item, [])), out = null, i;
     for (i = 0; i < bag.length; i++) {
       if (String(bag[i].note || '') === 'MXNCLIP') continue;
       if (bag[i].parent && String(bag[i].parent.note || '') === 'MXNCLIP') continue;
@@ -283,11 +383,11 @@ var CUTTAG = 'MXNCUT:';
     var bag = collect(item, []), out = [];
     for (var i = 0; i < bag.length; i++) {
       try {
-        if (!bag[i].closed) continue;
+        if (!isClosedish(bag[i])) continue;
         if (String(bag[i].note || '') === 'MXNCLIP') continue;
-        if (boundsArea(bag[i]) < 100) continue;         // on ignore les miettes
+        if (boundsArea(bag[i]) < 4) continue;           // on ignore les vraies miettes (< 0,5 mm²)
         out.push(bag[i]);
-        if (out.length >= 60) break;
+        if (out.length >= 800) break;                   // lettrage : un mot = des dizaines de tracés
       } catch (e) { }
     }
     return out;
@@ -298,6 +398,33 @@ var CUTTAG = 'MXNCUT:';
     return [[[b[0] / MM, -b[1] / MM], [b[2] / MM, -b[1] / MM], [b[2] / MM, -b[3] / MM], [b[0] / MM, -b[3] / MM]]];
   }
 
+  /* ce que les tracés fermés ne décrivent pas : textes vivants, images, symboles,
+     traits ouverts (gravure laser) — ils prennent leur boîte, pour ne jamais déborder */
+  function extrasOf(item, clip) {
+    var bag = boxItems(item, []), paths = collect(item, []), out = [], i;
+    for (i = 0; i < paths.length; i++) {
+      try {
+        if (isClosedish(paths[i])) continue;
+        if (String(paths[i].note || '') === 'MXNCLIP') continue;
+        out.push(paths[i]);
+      } catch (e) { }
+    }
+    for (i = 0; i < bag.length; i++) out.push(bag[i]);
+    if (!clip) return out;
+    var cb = clip.geometricBounds, keep = [];
+    for (i = 0; i < out.length; i++) {
+      var b = out[i].geometricBounds;
+      if (b[2] < cb[0] || b[0] > cb[2] || b[3] > cb[1] || b[1] < cb[3]) continue;   // hors masque : pas imprimé
+      keep.push(out[i]);
+    }
+    return keep;
+  }
+
+  function clipBox(b, cb) {
+    if (!cb) return b;
+    return [Math.max(b[0], cb[0]), Math.min(b[1], cb[1]), Math.min(b[2], cb[2]), Math.max(b[3], cb[3])];
+  }
+
   function footprint(item, M, tol) {
     var cuts = (M.mode === 'auto' && !M.key && !M.names.length) ? [] : cutsIn(item, M, []);
     var src = 'coupe', union = false, clipTo = null;
@@ -306,6 +433,7 @@ var CUTTAG = 'MXNCUT:';
       if (clip) clip.note = 'MXNCLIP';
       var big = biggestPath(item, true);                   // plus grande forme hors masque et hors cadres
       var vis = visibleBounds(item, clip);                 // tout ce que la pièce contient réellement
+      var extras = (clip && !M.tight) ? [] : extrasOf(item, clip);
       if (clip) clip.note = '';
 
       // par défaut : le masque d'écrêtage fait foi — il borne tout ce qui est visible,
@@ -333,9 +461,12 @@ var CUTTAG = 'MXNCUT:';
       else if (big && !vis) { cuts = [big]; src = 'tracé'; }
       else {
         var all = closedPaths(item);            // silhouette complète : toutes les formes réunies
-        if (all.length) { cuts = all; src = 'silhouette'; union = true; }
+        if (all.length || extras.length) { cuts = all; src = 'silhouette'; union = true; }
         else { cuts = []; src = 'boîte'; }
       }
+      if (src !== 'silhouette') extras = [];
+    } else if (cuts.length > 1) {
+      union = true;                 // plusieurs coupes (lettrage, trous) : une seule pièce pleine
     }
     var rings = [], subs = [], c, q;
     for (c = 0; c < cuts.length; c++) {
@@ -346,6 +477,20 @@ var CUTTAG = 'MXNCUT:';
     for (var f = 0; f < subs.length; f++) {
       var poly = flatten(subs[f], tol);
       if (poly.length > 2) rings.push(poly);
+    }
+    if (extras && extras.length) {
+      var ccb = clipTo ? clipTo.geometricBounds : null;
+      for (var x = 0; x < extras.length; x++) {
+        try {
+          var eb = clipBox(extras[x].geometricBounds, ccb);
+          if (eb[2] - eb[0] < 0.01 && eb[1] - eb[3] < 0.01) continue;
+          if (eb[2] - eb[0] < 0.3) { eb[0] -= 0.15; eb[2] += 0.15; }   // trait vertical : épaisseur mini
+          if (eb[1] - eb[3] < 0.3) { eb[1] += 0.15; eb[3] -= 0.15; }
+          rings.push([[eb[0] / MM, -eb[1] / MM], [eb[2] / MM, -eb[1] / MM],
+                      [eb[2] / MM, -eb[3] / MM], [eb[0] / MM, -eb[3] / MM]]);
+          cuts.push(extras[x]);       // ils comptent aussi pour recaler la pièce à la pose
+        } catch (eX) { }
+      }
     }
     if ((!rings.length || src === 'boîte') && M.mode === 'auto') {
       try {
@@ -359,7 +504,10 @@ var CUTTAG = 'MXNCUT:';
   }
 
   // un PDF importé n'a souvent qu'un seul gros groupe : on descend dedans
-  function explode(roots) {
+  /* Un groupe qui ne contient que des formes à plat (aucun sous-groupe) n'est pas un
+     kit emballé : c'est un mot vectorisé, un logo, une pièce. On ne le casse pas —
+     avant, un texte vectorisé partait en autant de pièces que de lettres. */
+  function explode(roots, keepGroups) {
     var guard = 0;
     while (roots.length === 1 && roots[0].typename === 'GroupItem' && guard++ < 8) {
       var clipped = false;
@@ -367,6 +515,10 @@ var CUTTAG = 'MXNCUT:';
       if (clipped) break;
       var kids = kidsOf(roots[0]);
       if (kids.length < 2) break;
+      var subGroups = 0;
+      for (var k = 0; k < kids.length; k++) if (kids[k].typename === 'GroupItem') subGroups++;
+      if (!subGroups) break;                     // que des formes : c'est UNE pièce
+      if (keepGroups && subGroups < kids.length) break;
       roots = kids;
     }
     return roots;
@@ -404,42 +556,244 @@ var CUTTAG = 'MXNCUT:';
     return { total: total, spots: names, colors: cols };
   }
 
+  /* --- fichiers rangés par TYPE (SVG d'autres logiciels) ---
+     Un groupe « Cutting Layer » / « Cut » / « Découpe » porte TOUS les contours de
+     coupe du kit, un groupe « Logos » tous les logos, un groupe « Text » tous les
+     textes. Pris tels quels, chacun ferait une seule pièce de plusieurs mètres.
+     On reconstruit les pièces : un contour de coupe = une pièce, et chaque visuel
+     rejoint le contour qui le contient. */
+  var CUTNAME = /(^|[^a-z])(cut|cutting|cutcontour|contour|coupe|d[ée]coupe|thru)([^a-z]|$)/i;
+
+  function bctr(b) { return [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2]; }
+  function inBox(pt, b, pad) { return pt[0] >= b[0] - pad && pt[0] <= b[2] + pad && pt[1] <= b[1] + pad && pt[1] >= b[3] - pad; }
+  function overlapArea(a, b) {
+    var w = Math.min(a[2], b[2]) - Math.max(a[0], b[0]), h = Math.min(a[1], b[1]) - Math.max(a[3], b[3]);
+    return (w > 0 && h > 0) ? w * h : 0;
+  }
+
+  var ALPHANAME = /^\s*alpha\s*$/i;
+  function findCutContainer(roots, re) {
+    re = re || CUTNAME;
+    for (var i = 0; i < roots.length; i++) {
+      var it = roots[i];
+      if (it.typename !== 'GroupItem' && it.typename !== 'Layer') continue;
+      if (!re.test(String(it.name || ''))) continue;
+      var kids = kidsOf(it), n = 0;
+      for (var k = 0; k < kids.length; k++) {
+        var tn = kids[k].typename;
+        if (tn === 'PathItem' || tn === 'CompoundPathItem' || tn === 'GroupItem') n++;
+      }
+      if (n >= 2) return it;
+    }
+    return null;
+  }
+
+  // combien de contours de coupe un objet touche : plus d'un = groupe fourre-tout à éclater
+  /* Bornes VISIBLES : Illustrator compte dans les bornes d'un groupe écrêté tout
+     ce que le masque cache. Un visuel débordant était donc rattaché à la
+     mauvaise pièce. On prend le masque pour un groupe écrêté. */
+  // masque d'un groupe : drapeau clipped du groupe OU tracé « clipping » parmi ses enfants
+  function maskOf(g) {
+    if (!g || g.typename !== 'GroupItem') return null;
+    var kids = kidsOf(g), i;
+    for (i = 0; i < kids.length; i++) {
+      try { if ((kids[i].typename === 'PathItem' || kids[i].typename === 'CompoundPathItem') && kids[i].clipping) return kids[i]; } catch (e) { }
+      try {
+        if (kids[i].typename === 'CompoundPathItem')
+          for (var j = 0; j < kids[i].pathItems.length; j++) if (kids[i].pathItems[j].clipping) return kids[i];
+      } catch (e2) { }
+    }
+    var c = false;
+    try { c = g.clipped === true; } catch (e3) { }
+    if (c) for (i = 0; i < kids.length; i++) if (kids[i].typename === 'PathItem' || kids[i].typename === 'CompoundPathItem') return kids[i];
+    return null;
+  }
+
+  function visBox(it, d) {
+    d = d || 0;
+    var tn = it.typename;
+    if (tn === 'GroupItem') {
+      var cp = maskOf(it);
+      if (cp) { try { return cp.geometricBounds; } catch (eCp) { } }
+      if (d < 8) {
+        var kids = kidsOf(it), out = null;
+        for (var i = 0; i < kids.length; i++) {
+          var b = visBox(kids[i], d + 1);
+          if (!b) continue;
+          out = out ? [Math.min(out[0], b[0]), Math.max(out[1], b[1]), Math.max(out[2], b[2]), Math.min(out[3], b[3])] : b;
+        }
+        if (out) return out;
+      }
+    }
+    try { return it.geometricBounds; } catch (e2) { return null; }
+  }
+
+  function cutsCovered(b, cutBoxes) {
+    var n = 0;
+    for (var c = 0; c < cutBoxes.length; c++) if (overlapArea(b, cutBoxes[c]) > 0) n++;
+    return n;
+  }
+
+  function unlockAll(it) {
+    try { if (it.locked) it.locked = false; } catch (e) { }
+    if (it.typename === 'GroupItem') for (var i = 0; i < it.pageItems.length; i++) unlockAll(it.pageItems[i]);
+  }
+
+  /* Structure des kits MX Spirit (SVG du configurateur) : Alpha = une forme par
+     pièce, Graphic = visuels en masques, Logos, Text, Cutting Layer = coupes.
+     Ces groupes peuvent être verrouillés ou éteints : on les cherche parmi TOUS
+     les objets du premier niveau, pas seulement les objets actifs. */
+  var REBUILT = [], REBUILT_BOX = [];
+  function rebuildFromCutLayer(doc, roots, stat) {
+    REBUILT = []; REBUILT_BOX = [];
+    var top = [], dp = doc.pageItems, t;
+    for (t = 0; t < dp.length; t++) {
+      try {
+        if (!dp[t].parent || dp[t].parent.typename !== 'Layer') continue;
+        if (isOff(dp[t])) continue;                     // décoché = on n'en veut pas : ni nesté, ni rallumé
+        var ly = dp[t].layer; if (ly && !ly.visible) continue;
+        top.push(dp[t]);
+      } catch (eT) { }
+    }
+    var holder = findCutContainer(top) || findCutContainer(top, ALPHANAME);
+    if (!holder) return null;
+    var lockedOrOff = false;
+    try { lockedOrOff = holder.locked || holder.hidden; } catch (eH) { }
+    roots = [];
+    for (t = 0; t < top.length; t++) {
+      var off = false;
+      try { off = top[t].hidden; } catch (eO) { }
+      roots.push(top[t]);       // verrouillés compris : le verrou est levé le temps de la pose, puis remis
+    }
+
+    var cuts = kidsOf(holder), cutBoxes = [], i, c;
+    for (i = 0; i < cuts.length; i++) cutBoxes.push(cuts[i].geometricBounds);
+
+    // les visuels : on éclate les groupes « fourre-tout » (Logos, Text…) qui couvrent plusieurs pièces
+    /* parcours en profondeur dans l'ordre d'empilement (du dessus vers le dessous) :
+       chaque pièce garde l'ordre d'origine — visuel sur le fond Alpha, logos et
+       textes par-dessus. */
+    var art = [];
+    function walkArt(it, d) {
+      var b = visBox(it);
+      if (!b) return;
+      // un groupe qui porte un masque ne s'éclate JAMAIS : on casserait l'écrêtage
+      if (it.typename === 'GroupItem' && !maskOf(it) && d < 6 && cutsCovered(b, cutBoxes) > 1) {
+        var kk = kidsOf(it);
+        for (var q = 0; q < kk.length; q++) walkArt(kk[q], d + 1);
+        return;
+      }
+      art.push(it);
+    }
+    for (i = 0; i < roots.length; i++) if (roots[i] !== holder) walkArt(roots[i], 0);
+
+    // chaque visuel va au contour qui contient son centre (le plus petit), sinon au plus recouvert
+    var groups = [];
+    for (c = 0; c < cuts.length; c++) groups.push([]);
+    var lost = 0;
+    for (i = 0; i < art.length; i++) {
+      var ab = visBox(art[i]) || art[i].geometricBounds, ctr = bctr(ab), best = -1, bestA = 0;
+      for (c = 0; c < cuts.length; c++) {
+        if (!inBox(ctr, cutBoxes[c], 0)) continue;
+        var A = boundsArea(cuts[c]);
+        if (best < 0 || A < bestA) { best = c; bestA = A; }
+      }
+      if (best < 0) {
+        for (c = 0; c < cuts.length; c++) {
+          var ov = overlapArea(ab, cutBoxes[c]);
+          if (ov > bestA) { bestA = ov; best = c; }
+        }
+      }
+      if (best < 0) { lost++; continue; }
+      groups[best].push(art[i]);
+    }
+
+    /* RIEN n'est regroupé ni recréé : la structure du fichier reste telle quelle.
+       Une pièce est un ENSEMBLE d'objets (coupe, forme Alpha, visuel, logos…)
+       que la pose déplacera et fera tourner d'un seul bloc. */
+    var pieces = [];
+    for (c = 0; c < cuts.length; c++) {
+      var members = [cuts[c]].concat(groups[c]);
+      var outline = [cuts[c]], extrasBox = [];
+      /* Empreinte = tout ce qui s'IMPRIME : la coupe, la forme Alpha, et le
+         dessin visible de chaque visuel (son masque s'il en a un, sinon ses
+         formes fermées). Un visuel qui déborde de la coupe (pointes, fond
+         perdu) ne doit jamais mordre sur la pièce voisine. */
+      for (i = 0; i < groups[c].length; i++) {
+        var m = groups[c][i], mt = m.typename;
+        if (mt === 'PathItem' || mt === 'CompoundPathItem') {
+          try { if (mt === 'PathItem' && !isClosedish(m)) continue; } catch (eCl) { }
+          outline.push(m); continue;
+        }
+        if (mt === 'GroupItem') {
+          var mk = maskOf(m);
+          if (mk) { outline.push(mk); continue; }
+          var cp = closedPaths(m);
+          for (var cq = 0; cq < cp.length; cq++) outline.push(cp[cq]);
+          continue;
+        }
+        extrasBox.push(m);                       // texte vivant, image… : sa boîte
+      }
+      REBUILT[pieces.length] = outline;
+      REBUILT_BOX[pieces.length] = extrasBox;
+      pieces.push({ typename: 'MXNSET', members: members, name: 'pièce ' + (c + 1), item: cuts[c] });
+    }
+    stat.rebuilt = pieces.length;
+    stat.orphans += lost;
+    return pieces;
+  }
+
   /* --- lecture des pièces --- */
   function scan(doc, M, selOnly, regroup, tol) {
-    var stat = { orphans: 0, grouped: 0, noArt: 0, byBox: 0, byMask: 0, bySil: 0 }, roots = [], i;
+    var stat = { orphans: 0, grouped: 0, noArt: 0, byBox: 0, byMask: 0, bySil: 0, off: 0, rebuilt: 0 }, roots = [], i;
     if (doc.selection && doc.selection.length > 1) {
       for (i = 0; i < doc.selection.length; i++) roots.push(doc.selection[i]);
     } else if (!selOnly) {
-      for (var L = 0; L < doc.layers.length; L++) {
-        var lay = doc.layers[L];
-        if (lay.locked || !lay.visible) continue;
-        var kids = kidsOf(lay);
-        for (i = 0; i < kids.length; i++) roots.push(kids[i]);
-      }
+      roots = liveRoots(doc);       // calques, sous-calques ; tout ce qui est éteint ou verrouillé est sauté
     } else if (doc.selection && doc.selection.length) {
       roots.push(doc.selection[0]);
     }
 
     var pieces = [];
     var hasMatcher = (M.mode === 'color' && M.key) || (M.mode === 'spot' && M.names.length);
+    var rebuilt = null;
+    var live = [];
+    for (i = 0; i < roots.length; i++) { if (isLive(roots[i])) live.push(roots[i]); else stat.off++; }
+    roots = live;
     if (hasMatcher) {
       findPieces(roots, M, pieces, stat, 0);
       if (regroup) autoGroup(pieces, M, stat);
     } else {
-      pieces = explode(roots);          // mode automatique : 1 objet de premier niveau = 1 pièce
+      rebuilt = rebuildFromCutLayer(doc, explode(roots, false).length > 1 ? explode(roots, false) : roots, stat);
+      pieces = rebuilt || explode(roots, M.keepGroups);   // mode automatique : 1 objet de premier niveau = 1 pièce
     }
 
     var parts = [];
     for (i = 0; i < pieces.length; i++) {
       var it = pieces[i];
       try { if (it.locked || it.hidden) continue; } catch (e) { }
-      var fp = footprint(it, M, tol);
+      var fp;
+      if (rebuilt && REBUILT[i]) {                 // pièce reconstruite : empreinte = coupe + forme Alpha
+        var subsR = [], ringsR = [], o2, q2;
+        for (o2 = 0; o2 < REBUILT[i].length; o2++) {
+          var oi = REBUILT[i][o2];
+          if (oi.typename === 'CompoundPathItem') { for (q2 = 0; q2 < oi.pathItems.length; q2++) subsR.push(oi.pathItems[q2]); }
+          else subsR.push(oi);
+        }
+        for (o2 = 0; o2 < subsR.length; o2++) { var pr = flatten(subsR[o2], tol); if (pr.length > 2) ringsR.push(pr); }
+        var cutsR = REBUILT[i].slice(0), bx = REBUILT_BOX[i] || [];
+        for (o2 = 0; o2 < bx.length; o2++) {
+          try { var bb = visBox(bx[o2]); ringsR.push([[bb[0] / MM, -bb[1] / MM], [bb[2] / MM, -bb[1] / MM], [bb[2] / MM, -bb[3] / MM], [bb[0] / MM, -bb[3] / MM]]); cutsR.push(bx[o2]); } catch (eBx) { }
+        }
+        fp = { rings: ringsR, cuts: cutsR, src: 'coupe', union: true };
+      } else if (it.typename === 'MXNSET') fp = footprint(it.item, M, tol);
+      else fp = footprint(it, M, tol);
       if (!fp.rings.length) { stat.orphans++; continue; }
       if (fp.src === 'boîte') stat.byBox++;
       if (fp.src === 'silhouette') stat.bySil++;
       if (fp.src === 'masque') stat.byMask++;
       parts.push({ item: it, cuts: fp.cuts, rings: fp.rings, src: fp.src, union: fp.union,
-                   name: it.name || it.typename });
+                   name: it.name || it.typename, set: it.typename === 'MXNSET' ? it.members : null });
     }
     return { parts: parts, stat: stat };
   }
@@ -501,14 +855,14 @@ function mxnsDiag() {
   } catch (e) { return 'ERR\t' + e; }
 }
 
-function mxnsScan(mode, namesCsv, selOnly, regroup, tight) {
+function mxnsScan(mode, namesCsv, selOnly, regroup, tight, keepGroups) {
   try {
     if (!app.documents.length) return 'ERR\tAucun document ouvert';
     var doc = app.activeDocument, i;
     var names = String(namesCsv).toLowerCase().split(',');
     for (i = 0; i < names.length; i++) names[i] = names[i].replace(/^\s+|\s+$/g, '');
     var M = { mode: String(mode), names: (String(mode) === 'spot' ? names : []), key: '',
-              tight: String(tight) === 'true' };
+              tight: String(tight) === 'true', keepGroups: String(keepGroups) === 'true' };
     if (M.mode === 'color') {
       var ref = pickReference(doc);
       if (!ref) return 'ERR\tSélectionne un contour de coupe avant de lancer';
@@ -548,7 +902,7 @@ function mxnsScan(mode, namesCsv, selOnly, regroup, tight) {
       }
     }
     out.push('END\t' + s.parts.length + '\t' + s.stat.orphans + '\t' + s.stat.grouped + '\t' +
-             s.stat.byMask + '\t' + s.stat.bySil + '\t' + s.stat.byBox);
+             s.stat.byMask + '\t' + s.stat.bySil + '\t' + s.stat.byBox + '\t' + s.stat.off + '\t' + s.stat.rebuilt);
     return out.join('\n');
   } catch (e) { return 'ERR\t' + e + ' (ligne ' + e.line + ')'; }
 }
@@ -575,18 +929,8 @@ function mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
 
     /* recherche RECURSIVE : une pièce peut être enfouie dans un groupe parent
        (PDF importé), elle n'est pas forcément au premier niveau du calque. */
-    var all = [];
-    function deep(it) {
-      all.push(it);
-      if (it.typename === 'GroupItem') {
-        var k = kidsOf(it);
-        for (var z = 0; z < k.length; z++) deep(k[z]);
-      }
-    }
-    for (var L = 0; L < doc.layers.length; L++) {
-      var kids = kidsOf(doc.layers[L]);
-      for (i = 0; i < kids.length; i++) deep(kids[i]);
-    }
+    var all = [], dp = doc.pageItems;            // tous les objets, sous-calques compris
+    for (i = 0; i < dp.length; i++) all.push(dp[i]);
     var index = {};
     for (i = 0; i < all.length; i++) {
       var nt = String(all[i].note || '');
@@ -606,7 +950,14 @@ function mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
       if (!item) item = index[f[0]];
       if (!item) { miss++; continue; }
       var ang = parseFloat(f[1]), tx = parseFloat(f[2]), ty = parseFloat(f[3]);
-      if (ang) item.rotate(-ang, true, true, true, true, Transformation.CENTER);
+      /* une pièce qu'on ne peut pas bouger (calque verrouillé ou éteint entre l'analyse
+         et la pose) ne doit plus faire échouer TOUT le plan : on la compte et on continue */
+      try {
+      var locks = unlockFor(item.typename === 'MXNSET' ? item.members : [item]);   // verrous rendus juste après la pose
+      if (ang) {
+        if (item.typename === 'MXNSET') rotateSet(item.members, -ang);
+        else item.rotate(-ang, true, true, true, true, Transformation.CENTER);
+      }
 
       /* on se recale sur les tracés qui ont servi au calcul, pas sur l'objet entier */
       var Lb = null, Tb = null, want = CUTTAG + f[0], cuts = null, gb;
@@ -628,10 +979,14 @@ function mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
           if (Tb === null || gb[1] > Tb) Tb = gb[1];
         }
       }
-      if (Lb === null) { var gi = item.geometricBounds; Lb = gi[0]; Tb = gi[1]; }
+      if (Lb === null) { var gi = item.typename === 'MXNSET' ? item.item.geometricBounds : item.geometricBounds; Lb = gi[0]; Tb = gi[1]; }
 
-      item.translate(originX + tx * MM - Lb, originY - ty * MM - Tb, true, true, true, true);
+      var dxA = originX + tx * MM - Lb, dyA = originY - ty * MM - Tb;
+      if (item.typename === 'MXNSET') { for (var mI = 0; mI < item.members.length; mI++) item.members[mI].translate(dxA, dyA, true, true, true, true); }
+      else item.translate(dxA, dyA, true, true, true, true);
+      relock(locks);
       done++;
+      } catch (eMove) { miss++; }
     }
 
     if (String(fitArtboard) === 'true' && parseFloat(lengthMm) > 0) {
@@ -642,6 +997,62 @@ function mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
     app.redraw();
     return 'OK\t' + done + '\t' + miss;
   } catch (e) { return 'ERR\t' + e + ' (ligne ' + e.line + ')'; }
+}
+
+function mxnsSelect(uid) {
+  try {
+    var it = $.global.MXNS_ITEMS ? $.global.MXNS_ITEMS[uid] : null;
+    if (!it) return 'ERR\tpièce introuvable';
+    app.activeDocument.selection = null;
+    it.selected = true;
+    try { app.activeDocument.views[0].centerPoint = bctr(it.geometricBounds); } catch (eV) { }
+    app.redraw();
+    return 'OK';
+  } catch (e) { return 'ERR\t' + e; }
+}
+
+/* Fait tourner un ensemble d'objets d'un seul bloc, autour du centre commun,
+   sans les regrouper : chacun tourne sur lui-même puis glisse là où la
+   rotation de l'ensemble l'amène. */
+/* Un objet verrouillé ne se déplace pas : on lève le verrou le temps de la pose,
+   puis on le remet. Rien n'est rallumé, rien ne change d'état. */
+function unlockFor(members) {
+  var list = [];
+  function walk(it) {
+    try { if (it.locked) { it.locked = false; list.push(it); } } catch (e) { }
+    if (it.typename === 'GroupItem') for (var i = 0; i < it.pageItems.length; i++) walk(it.pageItems[i]);
+  }
+  for (var m = 0; m < members.length; m++) {
+    walk(members[m]);
+    var p = members[m].parent, g = 0;          // un parent verrouillé bloque aussi
+    while (p && p.typename === 'GroupItem' && g++ < 20) {
+      try { if (p.locked) { p.locked = false; list.push(p); } } catch (e2) { }
+      p = p.parent;
+    }
+  }
+  return list;
+}
+function relock(list) {
+  if (!list) return;
+  for (var i = list.length - 1; i >= 0; i--) { try { list[i].locked = true; } catch (e) { } }
+}
+
+function rotateSet(members, deg) {
+  var L = null, T = null, R = null, B = null, i, b;
+  for (i = 0; i < members.length; i++) {
+    b = members[i].geometricBounds;
+    L = L === null ? b[0] : Math.min(L, b[0]); T = T === null ? b[1] : Math.max(T, b[1]);
+    R = R === null ? b[2] : Math.max(R, b[2]); B = B === null ? b[3] : Math.min(B, b[3]);
+  }
+  var px = (L + R) / 2, py = (T + B) / 2, a = deg * Math.PI / 180, ca = Math.cos(a), sa = Math.sin(a);
+  for (i = 0; i < members.length; i++) {
+    var m = members[i];
+    b = m.geometricBounds;
+    var cx = (b[0] + b[2]) / 2, cy = (b[1] + b[3]) / 2;
+    m.rotate(deg, true, true, true, true, Transformation.CENTER);
+    var nx = px + (cx - px) * ca - (cy - py) * sa, ny = py + (cx - px) * sa + (cy - py) * ca;
+    m.translate(nx - cx, ny - cy, true, true, true, true);   // le centre de rotation de l'objet ne bouge pas : on le déplace là où il doit aller
+  }
 }
 
 function mxnsUndo() { try { app.undo(); app.redraw(); return 'OK'; } catch (e) { return 'ERR\t' + e; } }
@@ -919,13 +1330,13 @@ function mxnsReset() {
           }
         } catch (eN) {}
         if (it.typename === 'GroupItem') {
-          var k = kidsOf(it);
+          var k = it.pageItems;               // tout, objets éteints compris
           for (var i = 0; i < k.length; i++) strip(k[i]);
         }
       }
-      for (var L = 0; L < doc.layers.length; L++) {
-        var kids = kidsOf(doc.layers[L]);
-        for (var i = 0; i < kids.length; i++) strip(kids[i]);
+      var allIt = doc.pageItems;            // sous-calques et objets éteints compris
+      for (var i = 0; i < allIt.length; i++) {
+        try { if (allIt[i].parent && allIt[i].parent.typename === 'Layer') strip(allIt[i]); } catch (eP) {}
       }
       app.redraw();
     }
@@ -1107,12 +1518,7 @@ function mxn_targets(doc) {
     for (i = 0; i < doc.selection.length; i++) out.push(doc.selection[i]);
     return out;
   }
-  for (var L = 0; L < doc.layers.length; L++) {
-    var lay = doc.layers[L];
-    if (lay.locked || !lay.visible) continue;
-    var kids = kidsOf(lay);
-    for (i = 0; i < kids.length; i++) out.push(kids[i]);
-  }
+  out = liveRoots(doc);
   /* un seul gros groupe (PDF importé) : on descend dedans */
   var guard = 0;
   while (out.length === 1 && out[0].typename === 'GroupItem' && guard++ < 8) {
