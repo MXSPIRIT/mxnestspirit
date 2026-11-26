@@ -185,14 +185,29 @@ var CUTTAG = 'MXNCUT:';
 
   /* Premier niveau de TOUS les calques et sous-calques, une seule fois chacun,
      en sautant ce qui est éteint ou verrouillé (objet, calque ou sous-calque parent). */
-  function liveRoots(doc) {
-    var out = [], all = doc.pageItems, i, it;
-    for (i = 0; i < all.length; i++) {
-      it = all[i];
-      try { if (!it.parent || it.parent.typename !== 'Layer') continue; } catch (e) { continue; }
-      if (!isLive(it)) continue;
-      out.push(it);
+  /* 4.3.1 — premier niveau de chaque calque et sous-calque, SANS passer par
+     doc.pageItems. doc.pageItems contient TOUS les objets du fichier, jusqu'au
+     dernier petit tracé d'un logo importé non nettoyé (des dizaines de milliers) :
+     le parcourir figeait Illustrator. Ici on ne touche que le premier niveau. */
+  function topItems(doc) {
+    var out = [];
+    function walkLayer(ly, d) {
+      var its, i, it;
+      try { its = ly.pageItems; } catch (e) { its = null; }
+      if (its) for (i = 0; i < its.length; i++) {
+        it = its[i];
+        try { if (it.parent && it.parent.typename !== 'Layer') continue; } catch (e2) { continue; }
+        out.push(it);
+      }
+      if (d < 20) { try { for (i = 0; i < ly.layers.length; i++) walkLayer(ly.layers[i], d + 1); } catch (e3) { } }
     }
+    for (var L = 0; L < doc.layers.length; L++) walkLayer(doc.layers[L], 0);
+    return out;
+  }
+
+  function liveRoots(doc) {
+    var out = [], all = topItems(doc), i;
+    for (i = 0; i < all.length; i++) if (isLive(all[i])) out.push(all[i]);
     return out;
   }
 
@@ -400,8 +415,14 @@ var CUTTAG = 'MXNCUT:';
 
   /* ce que les tracés fermés ne décrivent pas : textes vivants, images, symboles,
      traits ouverts (gravure laser) — ils prennent leur boîte, pour ne jamais déborder */
+  /* 4.3.1 — un logo non nettoyé (PDF, lien non incorporé, vectorisation) =
+     des milliers de traits ouverts. Avant : un rectangle PAR trait envoyé au
+     calcul -> des milliers de formes, Illustrator figé. Au-delà de quelques
+     dizaines, la pièce entière compte comme une seule boîte. */
+  var EXTRAS_MAX = 40;
   function extrasOf(item, clip) {
     var bag = boxItems(item, []), paths = collect(item, []), out = [], i;
+    if (paths.length > 400 || bag.length > EXTRAS_MAX) return clip ? [] : [item];
     for (i = 0; i < paths.length; i++) {
       try {
         if (isClosedish(paths[i])) continue;
@@ -410,6 +431,7 @@ var CUTTAG = 'MXNCUT:';
       } catch (e) { }
     }
     for (i = 0; i < bag.length; i++) out.push(bag[i]);
+    if (out.length > EXTRAS_MAX) return clip ? [] : [item];
     if (!clip) return out;
     var cb = clip.geometricBounds, keep = [];
     for (i = 0; i < out.length; i++) {
@@ -431,8 +453,12 @@ var CUTTAG = 'MXNCUT:';
     if (!cuts.length && M.mode === 'auto') {
       var clip = findClip(item, 0);
       if (clip) clip.note = 'MXNCLIP';
-      var big = biggestPath(item, true);                   // plus grande forme hors masque et hors cadres
-      var vis = visibleBounds(item, clip);                 // tout ce que la pièce contient réellement
+      /* 4.3.1 — pièce avec masque, sans « serrer au dessin » : le masque fait foi,
+         inutile de mesurer chaque tracé du visuel (25 s par pièce sur un logo
+         importé non nettoyé). */
+      var fast = !!clip && !M.tight;
+      var big = fast ? null : biggestPath(item, true);     // plus grande forme hors masque et hors cadres
+      var vis = fast ? null : visibleBounds(item, clip);   // tout ce que la pièce contient réellement
       var extras = (clip && !M.tight) ? [] : extrasOf(item, clip);
       if (clip) clip.note = '';
 
@@ -615,7 +641,9 @@ var CUTTAG = 'MXNCUT:';
     if (tn === 'GroupItem') {
       var cp = maskOf(it);
       if (cp) { try { return cp.geometricBounds; } catch (eCp) { } }
-      if (d < 8) {
+      var nk = 0;
+      try { nk = it.pageItems.length; } catch (eNk) { }
+      if (d < 8 && nk <= 40) {          // logo importé = des centaines de tracés : sa boîte suffit
         var kids = kidsOf(it), out = null;
         for (var i = 0; i < kids.length; i++) {
           var b = visBox(kids[i], d + 1);
@@ -646,10 +674,9 @@ var CUTTAG = 'MXNCUT:';
   var REBUILT = [], REBUILT_BOX = [];
   function rebuildFromCutLayer(doc, roots, stat) {
     REBUILT = []; REBUILT_BOX = [];
-    var top = [], dp = doc.pageItems, t;
+    var top = [], dp = topItems(doc), t;
     for (t = 0; t < dp.length; t++) {
       try {
-        if (!dp[t].parent || dp[t].parent.typename !== 'Layer') continue;
         if (isOff(dp[t])) continue;                     // décoché = on n'en veut pas : ni nesté, ni rallumé
         var ly = dp[t].layer; if (ly && !ly.visible) continue;
         top.push(dp[t]);
@@ -855,7 +882,16 @@ function mxnsDiag() {
   } catch (e) { return 'ERR\t' + e; }
 }
 
+/* 4.3.1 — aucune boîte de dialogue cachée (lien manquant, police absente…) :
+   derrière le panneau elle bloquait Illustrator comme un plantage. */
 function mxnsScan(mode, namesCsv, selOnly, regroup, tight, keepGroups) {
+  var ui = null;
+  try { ui = app.userInteractionLevel; app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (eUI) { }
+  var r = _mxnsScan(mode, namesCsv, selOnly, regroup, tight, keepGroups);
+  try { if (ui !== null) app.userInteractionLevel = ui; } catch (eUI2) { }
+  return r;
+}
+function _mxnsScan(mode, namesCsv, selOnly, regroup, tight, keepGroups) {
   try {
     if (!app.documents.length) return 'ERR\tAucun document ouvert';
     var doc = app.activeDocument, i;
@@ -908,7 +944,16 @@ function mxnsScan(mode, namesCsv, selOnly, regroup, tight, keepGroups) {
 }
 
 /* payload : "uid,angle,xmm,ymm;..."  — x,y = coin haut-gauche visé */
+/* 4.3.1 — aucune boîte de dialogue cachée (lien manquant, police absente…) :
+   derrière le panneau elle bloquait Illustrator comme un plantage. */
 function mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
+  var ui = null;
+  try { ui = app.userInteractionLevel; app.userInteractionLevel = UserInteractionLevel.DONTDISPLAYALERTS; } catch (eUI) { }
+  var r = _mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session);
+  try { if (ui !== null) app.userInteractionLevel = ui; } catch (eUI2) { }
+  return r;
+}
+function _mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
   try {
     if (!app.documents.length) return 'ERR\tAucun document ouvert';
     /* Le plan doit venir de l'analyse EN COURS : sinon on pose des pièces d'un
@@ -929,12 +974,19 @@ function mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
 
     /* recherche RECURSIVE : une pièce peut être enfouie dans un groupe parent
        (PDF importé), elle n'est pas forcément au premier niveau du calque. */
-    var all = [], dp = doc.pageItems;            // tous les objets, sous-calques compris
-    for (i = 0; i < dp.length; i++) all.push(dp[i]);
-    var index = {};
-    for (i = 0; i < all.length; i++) {
-      var nt = String(all[i].note || '');
-      if (nt.indexOf(TAG) === 0) index[nt.substring(TAG.length)] = all[i];
+    /* index par étiquette : construit seulement si une référence directe est perdue,
+       et sans descendre dans une pièce déjà trouvée (avant : TOUT le fichier à chaque pose) */
+    var index = null;
+    function buildIndex() {
+      index = {};
+      function w(it, d) {
+        var nt = '';
+        try { nt = String(it.note || ''); } catch (eN) { }
+        if (nt.indexOf(TAG) === 0) { index[nt.substring(TAG.length)] = it; return; }
+        try { if (it.typename === 'GroupItem' && d < 16) for (var k = 0; k < it.pageItems.length; k++) w(it.pageItems[k], d + 1); } catch (eW) { }
+      }
+      var tp = topItems(doc);
+      for (var t = 0; t < tp.length; t++) w(tp[t], 0);
     }
 
     var ab = doc.artboards[doc.artboards.getActiveArtboardIndex()];
@@ -947,7 +999,7 @@ function mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
       var item = null;
       try { if ($.global.MXNS_ITEMS && $.global.MXNS_ITEMS[f[0]]) item = $.global.MXNS_ITEMS[f[0]]; } catch (eG) {}
       try { if (item) { var probe = item.typename; } } catch (eDead) { item = null; }   // objet supprimé entre-temps
-      if (!item) item = index[f[0]];
+      if (!item) { if (!index) buildIndex(); item = index[f[0]]; }
       if (!item) { miss++; continue; }
       var ang = parseFloat(f[1]), tx = parseFloat(f[2]), ty = parseFloat(f[3]);
       /* une pièce qu'on ne peut pas bouger (calque verrouillé ou éteint entre l'analyse
@@ -1334,10 +1386,8 @@ function mxnsReset() {
           for (var i = 0; i < k.length; i++) strip(k[i]);
         }
       }
-      var allIt = doc.pageItems;            // sous-calques et objets éteints compris
-      for (var i = 0; i < allIt.length; i++) {
-        try { if (allIt[i].parent && allIt[i].parent.typename === 'Layer') strip(allIt[i]); } catch (eP) {}
-      }
+      var allIt = topItems(doc);            // sous-calques et objets éteints compris
+      for (var i = 0; i < allIt.length; i++) strip(allIt[i]);
       app.redraw();
     }
     return 'OK\t' + n;
