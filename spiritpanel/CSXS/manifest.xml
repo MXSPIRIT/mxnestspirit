@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtensionManifest Version="5.0" ExtensionBundleId="fr.mxspirit.mxnestspirit"
-                   ExtensionBundleVersion="4.3.0"
+                   ExtensionBundleVersion="4.3.1"
                    ExtensionBundleName="MXNestSpirit"
                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
-    <Extension Id="fr.mxspirit.mxnestspirit.panel" Version="4.3.0"/>
+    <Extension Id="fr.mxspirit.mxnestspirit.panel" Version="4.3.1"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList><Host Name="ILST" Version="[17.0,99.9]"/></HostList>
