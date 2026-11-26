@@ -7,6 +7,46 @@ Free, open source, written in a workshop that has been producing kits since 2009
 
 ---
 
+## What's new in 4.3
+
+**Nesting no longer touches the file structure.** No group is created, nothing
+is regrouped or moved between layers. A part stays what it is in the file — a
+group, a clipping mask or a single path — and the panel rotates and places it
+as is. Locked objects are unlocked for the placement, then locked again.
+
+**Hidden stays hidden.** A hidden object, group or layer (eye off in the
+Layers panel) is ignored: it is not nested, it no longer breaks the run and it
+is never shown again. A hidden element inside a clipping mask no longer
+distorts the part's shape. Guides are no longer taken for parts.
+
+**Lettering, laser and text.** Outlined text stays one block instead of
+splitting into letters, even inside a group. Live text (a name, for example),
+images and open engraving strokes are nested with their box and never overlap
+the next part. New option "Keep every group whole" for uses outside motocross
+kits.
+
+**Single paths and cutting PDFs.** A single path or compound path nests with
+its true shape. Contours from cutting PDFs, often flagged "open" although they
+close on themselves, are no longer treated as rectangles.
+
+**Kits sorted by type (configurator SVGs).** When a file keeps all cut lines in
+a "Cutting Layer" (or "Cut", "Découpe") group, the part shapes in "Alpha" and
+the artwork in "Graphic", "Logos", "Text", the panel finds each part and what
+belongs to it, without regrouping anything. The footprint covers everything
+that prints, including artwork that goes past the cut line.
+
+**Part wider than the roll.** Instead of an obscure Sparrow error, the panel
+names the part, gives its narrowest width and selects it in Illustrator. When
+Sparrow fails, the message now shows the actual cause from its log.
+
+**New panel layout.** Wide: the sheet on the left at full height, settings on
+the right with the buttons always visible at the top. Narrow (laptop):
+everything stacks with no gaps, rarely used settings fold into "Advanced
+settings". The version number shows in the header.
+
+**Fixed.** Fill shown above 100 %; one locked part made the whole placement
+fail; sublayers were read incorrectly.
+
 ## What's new in 4.2
 
 **Ink manager, modelled on Esko's Ink Manager.** Lists every ink actually used

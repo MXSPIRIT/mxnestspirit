@@ -7,6 +7,52 @@ Gratuite, libre, faite dans un atelier qui produit des kits depuis 2009.
 
 ---
 
+## Nouveau en 4.3
+
+**Le nesting ne touche plus à la structure du fichier.** Aucun groupe n'est
+créé, rien n'est regroupé ni déplacé d'un calque à l'autre. Une pièce reste
+ce qu'elle est dans le fichier — un groupe, un masque d'écrêtage ou un simple
+tracé — et le panneau la fait tourner et la pose telle quelle. Les objets
+verrouillés sont déverrouillés le temps de la pose, puis reverrouillés.
+
+**Ce qui est décoché reste décoché.** Un objet, un groupe ou un calque éteint
+(œil coupé dans le panneau Calques) est ignoré : il n'est pas imbriqué, il
+ne fait plus planter le calcul, et il n'est jamais rallumé. Un élément éteint à
+l'intérieur d'un masque ne fausse plus la forme de la pièce. Les repères ne
+sont plus pris pour des pièces.
+
+**Lettrage, laser et textes.** Un texte vectorisé reste un seul bloc au lieu
+de partir lettre par lettre, même dans un groupe. Un texte non vectorisé (un
+prénom, par exemple), une image ou un trait ouvert de gravure est imbriqué
+avec sa boîte, sans déborder sur la pièce voisine. Nouvelle case
+« Garder chaque groupe entier » pour les usages hors kits moto.
+
+**Tracés seuls et PDF de découpe.** Un simple tracé ou un tracé transparent
+s'imbrique avec sa vraie forme. Les contours des PDF de découpe, souvent
+marqués « ouverts » alors qu'ils se referment, ne sont plus pris pour des
+rectangles.
+
+**Kits rangés par type (SVG du configurateur).** Quand un fichier range
+toutes les coupes dans un groupe « Cutting Layer » (ou « Cut », « Découpe »),
+ou les formes de pièces dans « Alpha », et les visuels dans « Graphic »,
+« Logos », « Text », le panneau retrouve chaque pièce et ce qui lui appartient,
+sans rien regrouper. L'empreinte prend tout ce qui s'imprime, y compris un
+visuel qui dépasse de la coupe.
+
+**Pièce trop grande pour la laize.** Au lieu d'une erreur incompréhensible de
+Sparrow, le panneau nomme la pièce, donne sa largeur minimale et la
+sélectionne dans Illustrator. En cas d'échec, le message montre la vraie cause
+inscrite par Sparrow.
+
+**Nouvelle mise en page du panneau.** En large : la planche à gauche, sur
+toute la hauteur, et les réglages à droite, boutons toujours visibles en haut.
+En étroit (portable) : tout s'empile sans trou, les réglages rares sont
+repliés dans « Réglages avancés ». Le numéro de version s'affiche dans
+l'en-tête.
+
+**Corrigé.** Remplissage affiché au-dessus de 100 % ; une pièce verrouillée
+faisait échouer toute la pose ; les sous-calques étaient mal lus.
+
 ## Nouveau en 4.2
 
 **Gestionnaire d'encres, sur le modèle de l'Ink Manager d'Esko.** Il liste
