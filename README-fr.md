@@ -1,7 +1,14 @@
-# MXNestSpirit
+# MXNestSpirit — nesting gratuit pour Illustrator (kits déco motocross, stickers, vinyle)
 
-Imbrication true-shape pour Adobe Illustrator, pensée pour les kits déco moto.
-Gratuite, libre, faite dans un atelier qui produit des kits depuis 2009.
+**Logiciel de nesting gratuit pour Adobe Illustrator** — imbrication true-shape
+(forme réelle) pour les **kits déco motocross**, stickers, lettrage, vinyle,
+covering, print & cut, DTF, découpe laser et plotter de découpe (CutContour).
+Gratuit, open source, sans abonnement : une **alternative gratuite à eCut,
+TrueNest et aux logiciels de nesting payants**.
+Fait dans un atelier qui produit des kits déco moto depuis 2009.
+
+👉 **[Télécharger la dernière version](https://github.com/MXSPIRIT/mxnestspirit/releases/latest)** ·
+[Présentation sur mxspirit.fr](https://mxspirit.fr/fr/content/8-nesting-gratuit-mxnestspirit)
 
 **MX Spirit — Montpellier** · [English version](README.md)
 
