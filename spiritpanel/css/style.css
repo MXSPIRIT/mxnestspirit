@@ -183,3 +183,51 @@ button:disabled{opacity:.38;cursor:default}
 .inkcount{color:var(--ink-faint);font-variant-numeric:tabular-nums;text-align:right}
 .inkrow select{padding:3px 4px;font-size:11px}
 .inknote{color:var(--ink-faint);font-size:10.5px;margin:2px 0 0;line-height:1.45}
+
+/* ---------- 4.3 : mise en page ----------
+   Comme les outils de nesting du marché (Deepnest, eCut, SigmaNEST) : à gauche
+   la planche, qui prend toute la hauteur ; à droite une barre de réglages
+   qui défile seule, boutons collés en haut. Plus aucun trou : la colonne de
+   gauche ne contient que le métrage et l'aperçu, qui s'étire. */
+.stage{display:flex;align-items:flex-start;justify-content:center;min-height:0}
+#preview{margin:0}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;position:sticky;top:0;z-index:5;
+  background:var(--bg);padding:0 0 8px;margin-bottom:8px;border-bottom:1px solid var(--line-soft)}
+#hybrid{grid-column:auto}
+.actions #scan{order:1}.actions #hybrid{order:2}.actions #apply{order:3}.actions #stop{order:4}
+.actions #diag{order:5}.actions #run{order:6}.actions #reset{order:7;grid-column:1 / -1}
+.finitions{margin-top:0}
+.pane{margin-bottom:8px}
+#log{margin-top:0;max-height:110px}
+.hint{margin:6px 0 0}
+
+@media (min-width: 640px) {
+  html,body{height:100%;overflow:hidden}
+  body{display:flex;flex-direction:column}
+  header{flex:0 0 auto}
+  .cols{flex:1 1 auto;min-height:0;display:flex;align-items:stretch;gap:12px}
+  .left{flex:1 1 auto;min-width:0;display:flex;flex-direction:column}
+  .stage{flex:1 1 auto;background:#1c1c1c;border:1px solid var(--line);border-radius:var(--r);
+    align-items:center;overflow:hidden}
+  #preview{border:none;border-radius:0}
+  .side{flex:0 0 auto;width:clamp(330px,40%,420px);overflow-y:auto;overflow-x:hidden;padding-right:4px;
+    display:block}
+  #log{max-height:110px}
+}
+
+/* Écrans bas (portable) : tout se resserre. */
+@media (max-height: 950px) {
+  body{padding:8px 9px 8px;font-size:11.5px}
+  header{margin-bottom:6px}
+  .result{padding:6px 10px;margin-bottom:6px;gap:12px}
+  .metrage,.cols .metrage{font-size:30px}
+  .pane{padding:7px 9px 8px;margin-bottom:6px}
+  .row{margin-bottom:5px}
+  .grid3{gap:6px;margin-bottom:5px}
+  label{margin-bottom:2px}
+  input[type=text],input[type=number],select{padding:3px 5px}
+  button{padding:5px 7px}
+  .check{padding:1px 0;font-size:11px}
+  .finitions.folded{padding-bottom:7px}
+}
+#log:empty{display:none}
