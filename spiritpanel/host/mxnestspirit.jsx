@@ -1004,11 +1004,14 @@ function _mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
       var ang = parseFloat(f[1]), tx = parseFloat(f[2]), ty = parseFloat(f[3]);
       /* une pièce qu'on ne peut pas bouger (calque verrouillé ou éteint entre l'analyse
          et la pose) ne doit plus faire échouer TOUT le plan : on la compte et on continue */
-      try {
-      var locks = unlockFor(item.typename === 'MXNSET' ? item.members : [item]);   // verrous rendus juste après la pose
-      if (ang) {
+      var st = { rotated: false }, held = [];
+      var placeOne = function (deepU) {
+      var locks = unlockFor(item.typename === 'MXNSET' ? item.members : [item], deepU);   // verrous rendus juste après la pose
+      for (var hk = 0; hk < locks.length; hk++) held.push(locks[hk]);
+      if (ang && !st.rotated) {
         if (item.typename === 'MXNSET') rotateSet(item.members, -ang);
         else item.rotate(-ang, true, true, true, true, Transformation.CENTER);
+        st.rotated = true;
       }
 
       /* on se recale sur les tracés qui ont servi au calcul, pas sur l'objet entier */
@@ -1036,9 +1039,12 @@ function _mxnsApply(payload, sheetWidth, lengthMm, fitArtboard, session) {
       var dxA = originX + tx * MM - Lb, dyA = originY - ty * MM - Tb;
       if (item.typename === 'MXNSET') { for (var mI = 0; mI < item.members.length; mI++) item.members[mI].translate(dxA, dyA, true, true, true, true); }
       else item.translate(dxA, dyA, true, true, true, true);
-      relock(locks);
-      done++;
-      } catch (eMove) { miss++; }
+      };
+      try { placeOne(false); done++; }
+      catch (eMove) {
+        try { placeOne(true); done++; } catch (eMove2) { miss++; }   // un objet verrouillé À L'INTÉRIEUR de la pièce
+      }
+      relock(held);
     }
 
     if (String(fitArtboard) === 'true' && parseFloat(lengthMm) > 0) {
@@ -1068,14 +1074,18 @@ function mxnsSelect(uid) {
    rotation de l'ensemble l'amène. */
 /* Un objet verrouillé ne se déplace pas : on lève le verrou le temps de la pose,
    puis on le remet. Rien n'est rallumé, rien ne change d'état. */
-function unlockFor(members) {
+/* 4.3.1 — par défaut on ne regarde que la pièce et ses parents. Avant, on
+   lisait le verrou de CHAQUE tracé de la pièce (des milliers sur un logo
+   importé) : la pose était bien plus lente qu'en 4.2. La descente complète
+   n'est faite que si la pose a échoué (deep = true). */
+function unlockFor(members, deep) {
   var list = [];
-  function walk(it) {
+  function walk(it, d) {
     try { if (it.locked) { it.locked = false; list.push(it); } } catch (e) { }
-    if (it.typename === 'GroupItem') for (var i = 0; i < it.pageItems.length; i++) walk(it.pageItems[i]);
+    if (deep && it.typename === 'GroupItem') for (var i = 0; i < it.pageItems.length; i++) walk(it.pageItems[i], d + 1);
   }
   for (var m = 0; m < members.length; m++) {
-    walk(members[m]);
+    walk(members[m], 0);
     var p = members[m].parent, g = 0;          // un parent verrouillé bloque aussi
     while (p && p.typename === 'GroupItem' && g++ < 20) {
       try { if (p.locked) { p.locked = false; list.push(p); } } catch (e2) { }
