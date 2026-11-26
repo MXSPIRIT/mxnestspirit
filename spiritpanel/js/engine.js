@@ -56,7 +56,8 @@ var MXNest = (function () {
       for (var j = 0; j < rings.length; j++) {
         if (i !== j && pointInRing(pt[0], pt[1], rings[j])) depth++;
       }
-      a += (depth % 2 ? -1 : 1) * polyArea(rings[i]);
+      if (part.union) { if (!depth) a += Math.abs(polyArea(rings[i])); }   // pièce pleine : seuls les contours extérieurs comptent
+      else a += (depth % 2 ? -1 : 1) * polyArea(rings[i]);
     }
     part._area = Math.abs(a);
     return part._area;

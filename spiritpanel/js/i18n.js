@@ -73,6 +73,8 @@ var I18N = (function () {
     'chk.holes': 'Fill the gaps with small parts',
     'chk.regroup': 'Attach artwork to its contour',
     'chk.tight': 'Tighten to artwork instead of the mask',
+    'chk.keepgroups': 'Keep every group whole (lettering, laser)',
+    'lbl.advanced': 'Advanced settings',
     'chk.selonly': 'Selection only',
     'chk.fitab': 'Fit the artboard to the sheet length',
 

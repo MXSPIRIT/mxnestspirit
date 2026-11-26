@@ -660,14 +660,24 @@
         for (var i = 0; i < lines.length && !pick; i++) {
           if (lines[i].replace(/\s/g, "")) pick = lines[i];
         }
+        /* La première ligne n'est que l'horodatage de départ : la cause est en
+           fin de journal (ERROR, panicked, Error:). On prend la dernière ligne
+           qui en parle, sinon la dernière ligne écrite. */
+        var tail = "";
+        for (var t = lines.length - 1; t >= 0; t--) {
+          if (!lines[t].replace(/\s/g, "")) continue;
+          if (!tail) tail = lines[t];
+          if (/error|panic|invalid|fail/i.test(lines[t])) { tail = lines[t]; break; }
+        }
+        if (tail && tail !== pick) pick = tail;
         /* For a crash, where it happened says more than the log's first line. */
         if (code === "SOLVER_CRASHED") pick = crashDetail(log) || pick;
-        e.detail = pick.substring(0, 160);
+        e.detail = pick.substring(0, 400);
         /* On Windows, say how far it got: which form ran the .bat, and what the
          * engine returned. A crash that writes nothing still has an exit code. */
         if (winMarks) {
           var how = "run.bat ran (" + (launchedAs || "?") + "), engine exit=" + (ex ? ex[1] : "?");
-          e.detail = pick ? pick.substring(0, 120) + " / " + how : how + ", empty log";
+          e.detail = pick ? pick.substring(0, 400) + " / " + how : how + ", empty log";
         }
         return e;
       }

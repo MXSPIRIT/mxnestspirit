@@ -340,6 +340,7 @@
       window.MXNestSpirit.hint('Analyse d’abord le document.');
       return;
     }
+    if (window.MXNestSpirit.tooBig && window.MXNestSpirit.tooBig()) return;
 
     var opt = makeOptions();
     var tries = parseInt($id('effort').value, 10) || 16;

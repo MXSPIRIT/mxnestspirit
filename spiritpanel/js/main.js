@@ -210,7 +210,8 @@
     call('mxnsScan', [$('mode').value, $('cutnames').value,
                       $('selonly').checked ? 'true' : 'false',
                       $('regroup').checked ? 'true' : 'false',
-                      $('tight').checked ? 'true' : 'false'], function (txt) {
+                      $('tight').checked ? 'true' : 'false',
+                      $('keepgroups').checked ? 'true' : 'false'], function (txt) {
       var lines = txt.split('\n');
       if (lines[0].indexOf('ERR') === 0) { hint(lines[0].split('\t')[1], 'err'); lock(false); return; }
       var list = [], cur = null, stat = null;
@@ -236,7 +237,9 @@
       if (!parts.length) hint(T('msg.none', null, 'Aucune pièce trouvée — essaie « Que contient le fichier ? »'), 'err');
       else hint(T('msg.ready', { n: parts.length }, parts.length + ' pièces prêtes.'));
       if (stat) log('Analyse : ' + stat[1] + ' pièces, ' + stat[2] + ' ignorés, ' + stat[3] + ' regroupés · ' +
-                    stat[4] + ' masque, ' + stat[5] + ' silhouette, ' + stat[6] + ' boîte.');
+                    stat[4] + ' masque, ' + stat[5] + ' silhouette, ' + stat[6] + ' boîte' +
+                    (stat[7] && stat[7] !== '0' ? ' · ' + stat[7] + ' éteints/verrouillés sautés' : '') +
+                    (stat[8] && stat[8] !== '0' ? ' · pièces reconstruites depuis le calque de coupe : ' + stat[8] : '') + '.');
       lock(false);
     });
   });
@@ -258,8 +261,36 @@
   });
 
   // ---------- imbrication ----------
+  /* Une pièce plus large que la laize, sous TOUTES les rotations permises, ne
+     peut pas être posée : Sparrow s'arrêtait sur « could not construct an
+     initial placement », V10 la laissait de côté. On le dit avant de lancer,
+     en nommant la pièce, et on la sélectionne dans Illustrator. */
+  function tooBig() {
+    var o = options(), usable = o.sheetWidth - 2 * (o.edgeMargin || 0), worst = null;
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i], best = Infinity;
+      var steps = o.angleStep === -1 ? [0] : (function () { var a = [], st = Math.max(1, o.angleStep || 10); for (var d = 0; d < 180; d += st) a.push(d); if (a.indexOf(90) < 0) a.push(90); return a; })();
+      for (var s = 0; s < steps.length; s++) {
+        var r = steps[s] * Math.PI / 180, c = Math.cos(r), sn = Math.sin(r), lo = Infinity, hi = -Infinity;
+        for (var k = 0; k < p.rings.length; k++) for (var q = 0; q < p.rings[k].length; q++) {
+          var y = p.rings[k][q][0] * sn + p.rings[k][q][1] * c;
+          if (y < lo) lo = y; if (y > hi) hi = y;
+        }
+        if (hi - lo < best) best = hi - lo;
+      }
+      if (best > usable && (!worst || best > worst.w)) worst = { p: p, w: best };
+    }
+    if (!worst) return false;
+    hint('Pièce « ' + worst.p.name + ' » trop grande pour la laize : ' + Math.round(worst.w) + ' mm au plus étroit, ' +
+         Math.round(usable) + ' mm utiles. Elle est sélectionnée dans Illustrator.', 'err');
+    log('Trop grande : ' + worst.p.name + ' (' + Math.round(worst.w) + ' mm > ' + Math.round(usable) + ' mm).');
+    call('mxnsSelect', [worst.p.id], function () { });
+    return true;
+  }
+
   $('run').addEventListener('click', function () {
     if (!parts.length || busy) return;
+    if (tooBig()) return;
     lock(true);
     cancelled = false;
     $('stop').disabled = false;
@@ -418,7 +449,10 @@
     var availW = (host && host.clientWidth ? host.clientWidth : 380) - 2;
     var top = 0;
     try { top = cv.getBoundingClientRect().top; } catch (e) { top = 200; }
-    var availH = Math.max(160, (window.innerHeight || 900) - top - 70);
+    /* Sur un portable l'aperçu mangeait tout l'écran : on le plafonne à un tiers de la hauteur. */
+    var availH;
+    if (host && host.clientHeight > 120 && (window.innerWidth || 0) >= 640) availH = host.clientHeight - 2;   // panneau large : l'aperçu prend toute la colonne
+    else availH = Math.max(120, Math.min((window.innerHeight || 900) - top - 70, (window.innerHeight || 900) * 0.34));
     if (availW < 60) availW = 380;
 
     var scale = Math.min(availW / sw, availH / len);
@@ -877,6 +911,7 @@
   }
   foldable('finitions', 'finitions-head', 'mxns_finitions');
   foldable('encres', 'encres-head', 'mxns_encres');
+  foldable('avance', 'avance-head', 'mxns_avance');
 
   /* ---------- gestionnaire d'encres ----------
      Sur le modèle de l'Ink Manager d'Esko : toutes les encres utilisées, avec
@@ -1078,6 +1113,7 @@
     getParts: function () { return parts; },
     getResult: function () { return result; },
     getOptions: function () { return options(); },
+    tooBig: function () { return tooBig(); },
     setExternalResult: function (r) {
       result = r;
       setResult(r);
