@@ -490,6 +490,12 @@
 
   // ---------- application ----------
   $('apply').addEventListener('click', function () {
+    /* 4.3.1 — un plan ne se pose qu'UNE fois : reposer le même plan refaisait
+       la rotation par-dessus la première, et les pièces se chevauchaient. */
+    if (result && result.applied) {
+      hint('Ce plan est déjà posé. Ctrl+Z pour l\'annuler, ou relance le calcul.', 'err');
+      return;
+    }
     if (!result || busy) return;
 
     /* Garde-fou : un plan doit contenir AUTANT de pièces que l'analyse en a
@@ -519,6 +525,7 @@
         hint(T('msg.applied', { n: f[1], miss: f[2] > 0 ? T('msg.miss', { n: f[2] }, ' — ' + f[2] + ' introuvable(s)') : '' },
              f[1] + ' pièce(s) placées' + (f[2] > 0 ? ' — ' + f[2] + ' introuvable(s)' : '') + '. Ctrl+Z annule.'));
         log('Appliqué : ' + f[1] + ' pièces sur ' + (result.length / 1000).toFixed(3) + ' m.');
+        result.applied = true;
       }
       lock(false);
     });
